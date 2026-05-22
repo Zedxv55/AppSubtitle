@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Movie
@@ -89,21 +90,22 @@ fun AutoSubtitleScreen(
     ) {
         Spacer(modifier = Modifier.height(32.dp))
         Text(
-            text = "AutoSubtitle",
+            text = "EASY AI Subtitles",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 12.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
-        
         Text(
-            text = "Generate perfect Thai subtitles instantly using Groq & DeepSeek.",
-            style = MaterialTheme.typography.bodyLarge,
+            text = "สร้างมาเพื่อครีเอเตอร์ จบใน workflow เดียว",
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.padding(bottom = 40.dp)
+            modifier = Modifier.padding(bottom = 32.dp)
         )
 
+        // Step 1: Upload
+        StepHeader(number = "01", title = "วางคลิปลงไป")
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -111,43 +113,44 @@ fun AutoSubtitleScreen(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(16.dp)
+                    .padding(24.dp)
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (selectedFileUri != null) {
-                    if (isVideo) {
-                        Icon(
-                            imageVector = Icons.Default.Movie,
-                            contentDescription = "Video File",
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.AudioFile,
-                            contentDescription = "Pick Media",
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
-                    FilledTonalButton(onClick = { filePickerLauncher.launch("*/*") }) {
-                        Text("Select Another Media File")
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = if (isVideo) "Video file selected" else "Audio file selected",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
                     Icon(
-                        imageVector = Icons.Default.AudioFile,
-                        contentDescription = "Pick Media",
+                        imageVector = if (isVideo) Icons.Default.Movie else Icons.Default.AudioFile,
+                        contentDescription = "Media File",
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = if (isVideo) "Video Ready (Auto-compress applied)" else "Audio Ready",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    FilledTonalButton(onClick = { filePickerLauncher.launch("*/*") }) {
+                        Text("เปลี่ยนไฟล์ (Change file)")
+                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Movie,
+                        contentDescription = "Pick Media",
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "ลากหรือวางไฟล์วิดีโอ/เสียงลงไป",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "MP4, MOV, MP3, WAV",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=0.7f)
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
@@ -155,7 +158,7 @@ fun AutoSubtitleScreen(
                         modifier = Modifier.height(56.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Select Audio or Video File", style = MaterialTheme.typography.titleMedium)
+                        Text("Select File", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
@@ -163,99 +166,146 @@ fun AutoSubtitleScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Text(
-            text = "Translation Options",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.align(Alignment.Start)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        // Step 2: AI Settings
+        StepHeader(number = "02", title = "ปล่อยให้ AI จัดการ")
+        
+        var selectedTone by remember { mutableStateOf("Casual") }
+        val tones = listOf("Casual", "Hype", "Formal", "Educational")
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            FilterChip(
-                selected = translationTarget == TranslationTarget.NONE,
-                onClick = { translationTarget = TranslationTarget.NONE },
-                label = { Text("Original") },
-                shape = RoundedCornerShape(16.dp)
-            )
-            FilterChip(
-                selected = translationTarget == TranslationTarget.DEEPSEEK_THAI,
-                onClick = { translationTarget = TranslationTarget.DEEPSEEK_THAI },
-                label = { Text("DeepSeek (Thai)") },
-                shape = RoundedCornerShape(16.dp)
-            )
-            FilterChip(
-                selected = translationTarget == TranslationTarget.MISTRAL_THAI,
-                onClick = { translationTarget = TranslationTarget.MISTRAL_THAI },
-                label = { Text("Mistral (Thai)") },
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        var burnSubtitles by remember { mutableStateOf(false) }
-
-        Text(
-            text = "Export Options",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.align(Alignment.Start)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(24.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.padding(24.dp).fillMaxWidth()
             ) {
-                Checkbox(
-                    checked = burnSubtitles,
-                    onCheckedChange = { burnSubtitles = it },
-                    enabled = isVideo
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Burn Subtitles into Video (Hard-sub)", style = MaterialTheme.typography.bodyLarge)
+                Text("Translation Engine (50+ Languages Supported)", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = translationTarget == TranslationTarget.NONE,
+                        onClick = { translationTarget = TranslationTarget.NONE },
+                        label = { Text("Original") },
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    FilterChip(
+                        selected = translationTarget == TranslationTarget.DEEPSEEK_THAI,
+                        onClick = { translationTarget = TranslationTarget.DEEPSEEK_THAI },
+                        label = { Text("TH (DeepSeek)") },
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    FilterChip(
+                        selected = translationTarget == TranslationTarget.MISTRAL_THAI,
+                        onClick = { translationTarget = TranslationTarget.MISTRAL_THAI },
+                        label = { Text("TH (Mistral)") },
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("Tone Control (Magic Presets)", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    tones.forEach { tone ->
+                        FilterChip(
+                            selected = selectedTone == tone,
+                            onClick = { selectedTone = tone },
+                            label = { Text(tone) },
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        Button(
-            onClick = {
-                selectedFileUri?.let { uri ->
-                    viewModel.generateSubtitles(context, uri, translationTarget, burnSubtitles)
-                } ?: run {
-                    Toast.makeText(context, "Please select a file first", Toast.LENGTH_SHORT).show()
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            enabled = selectedFileUri != null && uiState !is SubtitleState.Loading
+        // Step 3: Export & Post
+        StepHeader(number = "03", title = "ส่งออก และโพสต์")
+        
+        var burnSubtitles by remember { mutableStateOf(false) }
+        var burnStyle by remember { mutableStateOf("TikTok") }
+        val burnStyles = listOf("TikTok", "Modern", "Minimal")
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            shape = RoundedCornerShape(24.dp)
         ) {
-            Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(24.dp))
-            Spacer(modifier = Modifier.width(12.dp))
-            Text("Generate Subtitles", style = MaterialTheme.typography.titleMedium)
-        }
+            Column(
+                modifier = Modifier.padding(24.dp).fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = burnSubtitles,
+                        onCheckedChange = { burnSubtitles = it },
+                        enabled = isVideo
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Burn Captions into MP4 (4K HDR Supported)", style = MaterialTheme.typography.bodyMedium)
+                }
+                
+                if (burnSubtitles) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Burn-in Style Pack", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        burnStyles.forEach { style ->
+                            FilterChip(
+                                selected = burnStyle == style,
+                                onClick = { burnStyle = style },
+                                label = { Text(style) },
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                        }
+                    }
+                }
 
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = {
+                        selectedFileUri?.let { uri ->
+                            viewModel.generateSubtitles(context, uri, translationTarget, burnSubtitles)
+                        } ?: run {
+                            Toast.makeText(context, "Please select a file first (Step 01)", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    enabled = selectedFileUri != null && uiState !is SubtitleState.Loading
+                ) {
+                    Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("Generate & Preview", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+        
         Spacer(modifier = Modifier.height(32.dp))
 
         when (val state = uiState) {
             is SubtitleState.Idle -> { }
             is SubtitleState.Loading -> {
                 CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(state.message, style = MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(state.message, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Spacer(modifier = Modifier.height(32.dp))
             }
             is SubtitleState.Error -> {
                 Text(
@@ -266,18 +316,25 @@ fun AutoSubtitleScreen(
             }
             is SubtitleState.Success -> {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Result SRT",
-                            style = MaterialTheme.typography.titleMedium
-                        )
+                        Column {
+                            Text(
+                                text = "Karaoke-Style Preview / Editor",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "แตะเพื่อแก้ไขทีละคำ (Live Preview)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
                         IconButton(onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             val clip = android.content.ClipData.newPlainText("Subtitle", state.subtitleText)
@@ -287,10 +344,11 @@ fun AutoSubtitleScreen(
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 100.dp, max = 400.dp)
+                            .heightIn(min = 150.dp, max = 500.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(16.dp)
@@ -298,12 +356,33 @@ fun AutoSubtitleScreen(
                     ) {
                         Text(
                             text = state.subtitleText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = androidx.compose.ui.unit.TextUnit(24f, androidx.compose.ui.unit.TextUnitType.Sp)
                         )
                     }
+                    Spacer(modifier = Modifier.height(40.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+fun StepHeader(number: String, title: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(number, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     }
 }
