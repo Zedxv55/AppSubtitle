@@ -1,6 +1,6 @@
 {
-  "name": "AutoSubtitle",
-  "description": "Generate Thai subtitles automatically using Groq and DeepSeek.",
+  "name": "EASY Subtitles",
+  "description": "Professional, self-healing creator subtitle workflow with failover AI engine translations.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

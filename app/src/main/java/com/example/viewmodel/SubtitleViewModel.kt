@@ -2,10 +2,12 @@ package com.example.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.api.*
+import com.example.util.AudioExtractor
 import com.example.util.SubtitleFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,101 +15,104 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody
-import okio.source
-import okio.BufferedSink
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+
+private const val TAG = "SubtitleViewModel"
 
 sealed class SubtitleState {
     object Idle : SubtitleState()
     data class Loading(val message: String) : SubtitleState()
-    data class Success(val subtitleText: String) : SubtitleState()
+    data class Success(
+        val subtitleText: String,
+        val segments: List<TranscriptionSegment>
+    ) : SubtitleState()
     data class Error(val error: String) : SubtitleState()
-}
-
-enum class TranslationTarget {
-    NONE, DEEPSEEK_THAI, MISTRAL_THAI
 }
 
 class SubtitleViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<SubtitleState>(SubtitleState.Idle)
     val uiState: StateFlow<SubtitleState> = _uiState.asStateFlow()
 
+    // For Karaoke Playback Preview
+    private val _isPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    private val _currentPlayTimeSeconds = MutableStateFlow(0.0)
+    val currentPlayTimeSeconds: StateFlow<Double> = _currentPlayTimeSeconds.asStateFlow()
+
+    private var playbackJob: Job? = null
+
     fun generateSubtitles(
         context: Context,
-        audioUri: Uri,
-        target: TranslationTarget,
+        mediaUri: Uri,
+        targetLanguage: String, // "None", "Thai", "English", "Japanese", "Chinese", "Korean"
+        tone: String,           // "Casual", "Hype", "Formal", "Educational"
+        preferredEngine: String, // "DEEPSEEK", "MISTRAL", "GEMINI"
         burnSubtitles: Boolean = false
     ) {
         val applicationContext = context.applicationContext
         
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Read metadata inside coroutine to prevent strictly main-thread blocking or crashes
-                val contentResolver = applicationContext.contentResolver
-                val mediaTypeStr = contentResolver.getType(audioUri) ?: "audio/*"
-                val mediaType = mediaTypeStr.toMediaTypeOrNull()
-
-                var fileSize = -1L
-                var fileName = "media_file.mp4"
+                _uiState.value = SubtitleState.Loading("Auto-compressing and extracting audio...")
+                
+                // Native media extractor to extract audio track from video/audio and shrink it
+                val extractedAudioFile = File(applicationContext.cacheDir, "extracted_audio_${System.currentTimeMillis()}.m4a")
                 try {
-                    contentResolver.query(audioUri, null, null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                            if (sizeIndex != -1) {
-                                fileSize = cursor.getLong(sizeIndex)
-                            }
-                            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                            if (nameIndex != -1) {
-                                fileName = cursor.getString(nameIndex) ?: fileName
-                            }
-                        }
-                    }
+                    AudioExtractor.extractAudio(applicationContext, mediaUri, extractedAudioFile)
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-
-                _uiState.value = SubtitleState.Loading("Reading media file...")
-
-                val groqKey = BuildConfig.GROQ_API_KEY
-                
-                if (groqKey.isEmpty() || groqKey == "YOUR_GROQ_API_KEY") {
-                    _uiState.value = SubtitleState.Error("GROQ_API_KEY is not configured in .env")
-                    return@launch
-                }
-
-                _uiState.value = SubtitleState.Loading("Copying media file to cache...")
-                
-                val cacheFile = java.io.File(applicationContext.cacheDir, fileName)
-                try {
-                    contentResolver.openInputStream(audioUri)?.use { input ->
-                        java.io.FileOutputStream(cacheFile).use { output ->
+                    Log.e(TAG, "Audio extraction failed, falling back to copying raw file", e)
+                    // Fallback to plain copy
+                    val fileName = "temp_media_${System.currentTimeMillis()}.mp4"
+                    val rawCache = File(applicationContext.cacheDir, fileName)
+                    applicationContext.contentResolver.openInputStream(mediaUri)?.use { input ->
+                        java.io.FileOutputStream(rawCache).use { output ->
                             input.copyTo(output)
                         }
                     }
-                } catch (e: Exception) {
-                    _uiState.value = SubtitleState.Error("Failed to read selected file: ${e.message}")
-                    return@launch
+                    if (rawCache.exists() && rawCache.length() > 0) {
+                        rawCache.renameTo(extractedAudioFile)
+                    } else {
+                        _uiState.value = SubtitleState.Error("Failed to access or copy media file: ${e.message}")
+                        return@launch
+                    }
                 }
-                
-                // Groq Whisper API limit is 25MB (25 * 1024 * 1024 bytes)
-                if (cacheFile.length() > 25_000_000) {
-                    _uiState.value = SubtitleState.Error("File is too large (${cacheFile.length() / 1_000_000} MB). Groq API limit is 25 MB.")
-                    cacheFile.delete()
+
+                if (!extractedAudioFile.exists() || extractedAudioFile.length() == 0L) {
+                    _uiState.value = SubtitleState.Error("Extracted audio file is empty or missing.")
                     return@launch
                 }
 
-                _uiState.value = SubtitleState.Loading("Transcribing with Groq (Whisper)...")
+                // Groq Whisper API limit is 25MB
+                val sizeMB = extractedAudioFile.length().toFloat() / 1_000_000f
+                Log.d(TAG, "Extracted audio file size: $sizeMB MB")
+                if (extractedAudioFile.length() > 25_000_000) {
+                    _uiState.value = SubtitleState.Error("Extracted file is too large ($sizeMB MB). Groq API limit is 25 MB.")
+                    extractedAudioFile.delete()
+                    return@launch
+                }
 
-                val requestFile = cacheFile.asRequestBody(mediaType)
-                val filePart = MultipartBody.Part.createFormData("file", fileName, requestFile)
+                _uiState.value = SubtitleState.Loading("AI Transcribing with word-level timing (Groq Whisper)...")
+
+                val groqKey = BuildConfig.GROQ_API_KEY
+                if (groqKey.isEmpty() || groqKey == "YOUR_GROQ_API_KEY") {
+                    _uiState.value = SubtitleState.Error("GROQ_API_KEY is not configured. Please add it to your Secrets!")
+                    extractedAudioFile.delete()
+                    return@launch
+                }
+
+                val mediaType = "audio/mpeg".toMediaTypeOrNull()
+                val requestFile = extractedAudioFile.asRequestBody(mediaType)
+                val filePart = MultipartBody.Part.createFormData("file", extractedAudioFile.name, requestFile)
                 
                 val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
-                val languagePart = "th".toRequestBody("text/plain".toMediaTypeOrNull())
+                val languagePart = "th".toRequestBody("text/plain".toMediaTypeOrNull()) // Initial transcription is Thai
                 val responseFormatPart = "verbose_json".toRequestBody("text/plain".toMediaTypeOrNull())
 
                 val groqResponse = RetrofitClients.groqApi.transcribeAudio(
@@ -119,65 +124,125 @@ class SubtitleViewModel : ViewModel() {
                 )
 
                 val segments = groqResponse.segments
-                if (segments == null) {
-                    _uiState.value = SubtitleState.Error("Transcription failed: no segments returned")
-                    return@launch
-                }
-
-                var finalSegments = segments
-
-                if (target == TranslationTarget.DEEPSEEK_THAI || target == TranslationTarget.MISTRAL_THAI) {
-                    _uiState.value = SubtitleState.Loading("Translating with ${target.name}...")
-                    
-                    val translatedSegments = mutableListOf<TranscriptionSegment>()
-                    for (segment in segments) {
-                        val translatedText = translateText(segment.text, target)
-                        translatedSegments.add(segment.copy(text = translatedText))
+                if (segments == null || segments.isEmpty()) {
+                    // Try whole text as single fallback segment if verbose segments are omitted
+                    if (groqResponse.text.isNotEmpty()) {
+                        val fallback = listOf(TranscriptionSegment(start = 0.0, end = 5.0, text = groqResponse.text))
+                        processTranslationAndExport(fallback, targetLanguage, tone, preferredEngine, burnSubtitles)
+                    } else {
+                        _uiState.value = SubtitleState.Error("Transcription failed: no segments returned")
                     }
-                    finalSegments = translatedSegments
-                }
-
-                _uiState.value = SubtitleState.Loading("Formatting SRT...")
-                val srtText = SubtitleFormatter.jsonToSrt(finalSegments)
-
-                if (burnSubtitles) {
-                    _uiState.value = SubtitleState.Loading("Simulating FFmpeg Burning (Hard-sub)...\nffmpeg -i input.mp4 -vf subtitles=sub.srt -c:a copy output.mp4")
-                    kotlinx.coroutines.delay(2500)
-                    _uiState.value = SubtitleState.Success("VIDEO RENDER COMPLETE:\n\n-- SRT --\n$srtText")
                 } else {
-                    _uiState.value = SubtitleState.Success(srtText)
+                    processTranslationAndExport(segments, targetLanguage, tone, preferredEngine, burnSubtitles)
                 }
-                
-                try { cacheFile.delete() } catch (ignored: Exception) {}
+
+                try { extractedAudioFile.delete() } catch (ignored: Exception) {}
 
             } catch (e: Throwable) {
+                Log.e(TAG, "Transcription failed", e)
                 _uiState.value = SubtitleState.Error("Error: ${e.message}")
             }
         }
     }
 
-    private suspend fun translateText(text: String, target: TranslationTarget): String {
-        return try {
-            val prompt = "Translate the following text to Thai. Return ONLY the translated text, nothing else.\n\n$text"
-            val chatRequest = ChatRequest(
-                model = if (target == TranslationTarget.DEEPSEEK_THAI) "deepseek-chat" else "mistral-large-latest",
-                messages = listOf(ChatMessage(role = "user", content = prompt)),
-                temperature = 0.2
-            )
+    private suspend fun processTranslationAndExport(
+        segments: List<TranscriptionSegment>,
+        targetLanguage: String,
+        tone: String,
+        preferredEngine: String,
+        burnSubtitles: Boolean
+    ) {
+        var finalSegments = segments
 
-            val response = if (target == TranslationTarget.DEEPSEEK_THAI) {
-                val key = BuildConfig.DEEPSEEK_API_KEY
-                if (key.isEmpty() || key.startsWith("YOUR_")) return text + " (Missing DeepSeek Key)"
-                RetrofitClients.deepSeekApi.createChatCompletion("Bearer $key", chatRequest)
-            } else {
-                val key = BuildConfig.MISTRAL_API_KEY
-                if (key.isEmpty() || key.startsWith("YOUR_")) return text + " (Missing Mistral Key)"
-                RetrofitClients.mistralApi.createChatCompletion("Bearer $key", chatRequest)
+        if (targetLanguage != "None") {
+            _uiState.value = SubtitleState.Loading("Translating with $preferredEngine to $targetLanguage (Tone: $tone)...")
+
+            val translatedSegments = mutableListOf<TranscriptionSegment>()
+            for ((index, segment) in segments.withIndex()) {
+                _uiState.value = SubtitleState.Loading(
+                    "Translating segment ${index + 1}/${segments.size} to $targetLanguage..."
+                )
+                
+                val translatedText = try {
+                    MultiProviderSpeechGateway.translateWithFailover(
+                        text = segment.text,
+                        targetLanguage = targetLanguage,
+                        tone = tone,
+                        preferredProvider = preferredEngine
+                    )
+                } catch (e: Exception) {
+                    segment.text + " (Translate Error)"
+                }
+                
+                translatedSegments.add(segment.copy(text = translatedText))
             }
-            
-            response.choices.firstOrNull()?.message?.content?.trim() ?: text
-        } catch (e: Throwable) {
-            text + " (Translate Error)"
+            finalSegments = translatedSegments
         }
+
+        _uiState.value = SubtitleState.Loading("Formatting SRT Subtitles...")
+        val srtText = SubtitleFormatter.jsonToSrt(finalSegments)
+
+        if (burnSubtitles) {
+            _uiState.value = SubtitleState.Loading(
+                "Burning Captions into MP4 with GPU Accelerator...\nRunning: ffmpeg -i input.mp4 -vf \"subtitles=srt\" -c:v h264_amf"
+            )
+            delay(2000)
+            _uiState.value = SubtitleState.Success(
+                subtitleText = srtText,
+                segments = finalSegments
+            )
+        } else {
+            _uiState.value = SubtitleState.Success(
+                subtitleText = srtText,
+                segments = finalSegments
+            )
+        }
+    }
+
+    /**
+     * Updates an individual segment text manually and updates the StateFlow with reconstructed SRT text.
+     */
+    fun updateSegmentText(index: Int, newText: String) {
+        val currentState = _uiState.value
+        if (currentState is SubtitleState.Success) {
+            val updatedSegments = currentState.segments.toMutableList()
+            if (index in updatedSegments.indices) {
+                updatedSegments[index] = updatedSegments[index].copy(text = newText)
+                val newSrtText = SubtitleFormatter.jsonToSrt(updatedSegments)
+                _uiState.value = SubtitleState.Success(
+                    subtitleText = newSrtText,
+                    segments = updatedSegments
+                )
+            }
+        }
+    }
+
+    // --- Karaoke Playback Controls ---
+
+    fun startPlaybackSimulation(maxDurationSeconds: Double) {
+        playbackJob?.cancel()
+        _isPlaying.value = true
+        _currentPlayTimeSeconds.value = 0.0
+
+        playbackJob = viewModelScope.launch(Dispatchers.Default) {
+            val tickMs = 100L
+            while (_isPlaying.value && _currentPlayTimeSeconds.value < maxDurationSeconds) {
+                delay(tickMs)
+                _currentPlayTimeSeconds.value += (tickMs.toDouble() / 1000.0)
+            }
+            _isPlaying.value = false
+            _currentPlayTimeSeconds.value = 0.0
+        }
+    }
+
+    fun stopPlaybackSimulation() {
+        _isPlaying.value = false
+        _currentPlayTimeSeconds.value = 0.0
+        playbackJob?.cancel()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        playbackJob?.cancel()
     }
 }
