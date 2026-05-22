@@ -16,9 +16,11 @@ import kotlinx.coroutines.Dispatchers
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody
 import okio.source
 import okio.BufferedSink
+import java.io.File
 
 sealed class SubtitleState {
     object Idle : SubtitleState()
@@ -43,32 +45,32 @@ class SubtitleViewModel : ViewModel() {
     ) {
         val applicationContext = context.applicationContext
         
-        // Read metadata before launching coroutine to avoid permission/context loss
-        val contentResolver = applicationContext.contentResolver
-        val mediaTypeStr = contentResolver.getType(audioUri) ?: "audio/*"
-        val mediaType = mediaTypeStr.toMediaTypeOrNull()
-
-        var fileSize = -1L
-        var fileName = "media_file.mp4"
-        try {
-            contentResolver.query(audioUri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                    if (sizeIndex != -1) {
-                        fileSize = cursor.getLong(sizeIndex)
-                    }
-                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1) {
-                        fileName = cursor.getString(nameIndex) ?: fileName
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // Read metadata inside coroutine to prevent strictly main-thread blocking or crashes
+                val contentResolver = applicationContext.contentResolver
+                val mediaTypeStr = contentResolver.getType(audioUri) ?: "audio/*"
+                val mediaType = mediaTypeStr.toMediaTypeOrNull()
+
+                var fileSize = -1L
+                var fileName = "media_file.mp4"
+                try {
+                    contentResolver.query(audioUri, null, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (sizeIndex != -1) {
+                                fileSize = cursor.getLong(sizeIndex)
+                            }
+                            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1) {
+                                fileName = cursor.getString(nameIndex) ?: fileName
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 _uiState.value = SubtitleState.Loading("Reading media file...")
 
                 val groqKey = BuildConfig.GROQ_API_KEY
@@ -78,22 +80,30 @@ class SubtitleViewModel : ViewModel() {
                     return@launch
                 }
 
-                _uiState.value = SubtitleState.Loading("Transcribing with Groq (Whisper)...")
-
-                val requestFile = object : RequestBody() {
-                    override fun contentType() = mediaType
-                    override fun contentLength() = fileSize
-                    override fun writeTo(sink: okio.BufferedSink) {
-                        try {
-                            contentResolver.openInputStream(audioUri)?.use { inputStream ->
-                                sink.writeAll(inputStream.source())
-                            }
-                        } catch (e: Exception) {
-                            throw java.io.IOException("Failed to read media file", e)
+                _uiState.value = SubtitleState.Loading("Copying media file to cache...")
+                
+                val cacheFile = java.io.File(applicationContext.cacheDir, fileName)
+                try {
+                    contentResolver.openInputStream(audioUri)?.use { input ->
+                        java.io.FileOutputStream(cacheFile).use { output ->
+                            input.copyTo(output)
                         }
                     }
+                } catch (e: Exception) {
+                    _uiState.value = SubtitleState.Error("Failed to read selected file: ${e.message}")
+                    return@launch
                 }
                 
+                // Groq Whisper API limit is 25MB (25 * 1024 * 1024 bytes)
+                if (cacheFile.length() > 25_000_000) {
+                    _uiState.value = SubtitleState.Error("File is too large (${cacheFile.length() / 1_000_000} MB). Groq API limit is 25 MB.")
+                    cacheFile.delete()
+                    return@launch
+                }
+
+                _uiState.value = SubtitleState.Loading("Transcribing with Groq (Whisper)...")
+
+                val requestFile = cacheFile.asRequestBody(mediaType)
                 val filePart = MultipartBody.Part.createFormData("file", fileName, requestFile)
                 
                 val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
@@ -137,6 +147,8 @@ class SubtitleViewModel : ViewModel() {
                 } else {
                     _uiState.value = SubtitleState.Success(srtText)
                 }
+                
+                try { cacheFile.delete() } catch (ignored: Exception) {}
 
             } catch (e: Exception) {
                 _uiState.value = SubtitleState.Error("Error: ${e.message}")

@@ -68,8 +68,14 @@ fun AutoSubtitleScreen(
     // Determine if selected file is video based on MIME type or extension
     LaunchedEffect(selectedFileUri) {
         selectedFileUri?.let { uri ->
-            val type = context.contentResolver.getType(uri)
-            isVideo = type?.startsWith("video/") == true
+            try {
+                val type = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.getType(uri)
+                }
+                isVideo = type?.startsWith("video/") == true
+            } catch (e: Exception) {
+                isVideo = false
+            }
         }
     }
 
@@ -104,23 +110,44 @@ fun AutoSubtitleScreen(
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    imageVector = Icons.Default.AudioFile,
-                    contentDescription = "Pick Media",
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { filePickerLauncher.launch("*/*") }) {
-                    Text("Select Audio or Video File")
-                }
                 if (selectedFileUri != null) {
+                    if (isVideo) {
+                        Icon(
+                            imageVector = Icons.Default.AudioFile,
+                            contentDescription = "Pick Media",
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.AudioFile,
+                            contentDescription = "Pick Media",
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = { filePickerLauncher.launch("*/*") }) {
+                        Text("Select Another Media File")
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = if (isVideo) "Video file selected" else "Audio file selected",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.AudioFile,
+                        contentDescription = "Pick Media",
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = { filePickerLauncher.launch("*/*") }) {
+                        Text("Select Audio or Video File")
+                    }
                 }
             }
         }
