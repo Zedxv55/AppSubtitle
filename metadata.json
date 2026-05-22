@@ -1,0 +1,6 @@
+{
+  "name": "AutoSubtitle",
+  "description": "Generate Thai subtitles automatically using Groq and DeepSeek.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
