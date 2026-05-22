@@ -100,6 +100,8 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  // FFmpegKit dependency (uncomment when Maven Central resolves the artifact)
+  // implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2")
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

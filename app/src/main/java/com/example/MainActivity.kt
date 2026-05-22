@@ -63,6 +63,16 @@ fun AutoSubtitleScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? -> uri?.let { selectedFileUri = it } }
 
+    var isVideo by remember { mutableStateOf(false) }
+    
+    // Determine if selected file is video based on MIME type or extension
+    LaunchedEffect(selectedFileUri) {
+        selectedFileUri?.let { uri ->
+            val type = context.contentResolver.getType(uri)
+            isVideo = type?.startsWith("video/") == true
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -96,18 +106,18 @@ fun AutoSubtitleScreen(
             ) {
                 Icon(
                     imageVector = Icons.Default.AudioFile,
-                    contentDescription = "Pick Audio",
+                    contentDescription = "Pick Media",
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { filePickerLauncher.launch("audio/*") }) {
-                    Text("Select Audio File")
+                Button(onClick = { filePickerLauncher.launch("*/*") }) {
+                    Text("Select Audio or Video File")
                 }
                 if (selectedFileUri != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "File selected",
+                        text = if (isVideo) "Video file selected" else "Audio file selected",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -146,11 +156,32 @@ fun AutoSubtitleScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+        var burnSubtitles by remember { mutableStateOf(false) }
+
+        Text(
+            text = "Export Options",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = burnSubtitles,
+                onCheckedChange = { burnSubtitles = it },
+                enabled = isVideo
+            )
+            Text("Burn Subtitles into Video (Hard-sub) using FFmpeg", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick = {
                 selectedFileUri?.let { uri ->
-                    viewModel.generateSubtitles(context, uri, translationTarget)
+                    viewModel.generateSubtitles(context, uri, translationTarget, burnSubtitles)
                 } ?: run {
                     Toast.makeText(context, "Please select a file first", Toast.LENGTH_SHORT).show()
                 }

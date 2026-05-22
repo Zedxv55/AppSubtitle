@@ -23,12 +23,21 @@ interface GroqApi {
 @JsonClass(generateAdapter = true)
 data class GroqTranscriptionResponse(
     val text: String,
-    val segments: List<TranscriptionSegment>? = null
+    val segments: List<TranscriptionSegment>? = null,
+    val words: List<TranscriptionWord>? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class TranscriptionSegment(
     val start: Double,
     val end: Double,
-    val text: String
+    val text: String,
+    val words: List<TranscriptionWord>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class TranscriptionWord(
+    val start: Double,
+    val end: Double,
+    val word: String
 )
