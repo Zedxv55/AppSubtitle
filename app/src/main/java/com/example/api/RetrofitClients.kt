@@ -9,7 +9,6 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClients {
     private val moshi = Moshi.Builder()
-        .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
         .build()
 
     private val okHttpClient = OkHttpClient.Builder()
