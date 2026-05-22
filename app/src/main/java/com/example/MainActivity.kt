@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.*
@@ -113,8 +114,8 @@ fun AutoSubtitleScreen(
                 if (selectedFileUri != null) {
                     if (isVideo) {
                         Icon(
-                            imageVector = Icons.Default.AudioFile,
-                            contentDescription = "Pick Media",
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = "Video File",
                             modifier = Modifier.size(48.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )

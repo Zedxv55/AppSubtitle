@@ -150,7 +150,7 @@ class SubtitleViewModel : ViewModel() {
                 
                 try { cacheFile.delete() } catch (ignored: Exception) {}
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 _uiState.value = SubtitleState.Error("Error: ${e.message}")
             }
         }
@@ -176,7 +176,7 @@ class SubtitleViewModel : ViewModel() {
             }
             
             response.choices.firstOrNull()?.message?.content?.trim() ?: text
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             text + " (Translate Error)"
         }
     }
