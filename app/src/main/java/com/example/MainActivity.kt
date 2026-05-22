@@ -83,27 +83,31 @@ fun AutoSubtitleScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Spacer(modifier = Modifier.height(32.dp))
         Text(
             text = "AutoSubtitle",
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier.padding(bottom = 12.dp)
         )
         
         Text(
             text = "Generate perfect Thai subtitles instantly using Groq & DeepSeek.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 32.dp)
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(bottom = 40.dp)
         )
 
-        Card(
+        ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            shape = RoundedCornerShape(24.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -128,15 +132,15 @@ fun AutoSubtitleScreen(
                         )
                     }
                     
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = { filePickerLauncher.launch("*/*") }) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    FilledTonalButton(onClick = { filePickerLauncher.launch("*/*") }) {
                         Text("Select Another Media File")
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = if (isVideo) "Video file selected" else "Audio file selected",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.secondary
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     Icon(
@@ -145,41 +149,49 @@ fun AutoSubtitleScreen(
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = { filePickerLauncher.launch("*/*") }) {
-                        Text("Select Audio or Video File")
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { filePickerLauncher.launch("*/*") },
+                        modifier = Modifier.height(56.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Select Audio or Video File", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
         Text(
             text = "Translation Options",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.align(Alignment.Start)
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             FilterChip(
                 selected = translationTarget == TranslationTarget.NONE,
                 onClick = { translationTarget = TranslationTarget.NONE },
-                label = { Text("Original") }
+                label = { Text("Original") },
+                shape = RoundedCornerShape(16.dp)
             )
             FilterChip(
                 selected = translationTarget == TranslationTarget.DEEPSEEK_THAI,
                 onClick = { translationTarget = TranslationTarget.DEEPSEEK_THAI },
-                label = { Text("DeepSeek (Thai)") }
+                label = { Text("DeepSeek (Thai)") },
+                shape = RoundedCornerShape(16.dp)
             )
             FilterChip(
                 selected = translationTarget == TranslationTarget.MISTRAL_THAI,
                 onClick = { translationTarget = TranslationTarget.MISTRAL_THAI },
-                label = { Text("Mistral (Thai)") }
+                label = { Text("Mistral (Thai)") },
+                shape = RoundedCornerShape(16.dp)
             )
         }
 
@@ -188,23 +200,33 @@ fun AutoSubtitleScreen(
 
         Text(
             text = "Export Options",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.align(Alignment.Start)
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
+        Spacer(modifier = Modifier.height(12.dp))
+        ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            shape = RoundedCornerShape(16.dp)
         ) {
-            Checkbox(
-                checked = burnSubtitles,
-                onCheckedChange = { burnSubtitles = it },
-                enabled = isVideo
-            )
-            Text("Burn Subtitles into Video (Hard-sub) using FFmpeg", style = MaterialTheme.typography.bodyMedium)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = burnSubtitles,
+                    onCheckedChange = { burnSubtitles = it },
+                    enabled = isVideo
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Burn Subtitles into Video (Hard-sub)", style = MaterialTheme.typography.bodyLarge)
+            }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
         Button(
             onClick = {
@@ -214,12 +236,16 @@ fun AutoSubtitleScreen(
                     Toast.makeText(context, "Please select a file first", Toast.LENGTH_SHORT).show()
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             enabled = selectedFileUri != null && uiState !is SubtitleState.Loading
         ) {
-            Icon(Icons.Default.Translate, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Generate Subtitles")
+            Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(24.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Text("Generate Subtitles", style = MaterialTheme.typography.titleMedium)
         }
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -242,7 +268,6 @@ fun AutoSubtitleScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -264,8 +289,9 @@ fun AutoSubtitleScreen(
                     }
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(8.dp))
+                            .fillMaxWidth()
+                            .heightIn(min = 100.dp, max = 400.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(16.dp)
                             .verticalScroll(rememberScrollState())
