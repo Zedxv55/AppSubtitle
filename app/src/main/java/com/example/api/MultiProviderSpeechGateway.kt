@@ -76,8 +76,114 @@ object GeminiClient {
 
 object MultiProviderSpeechGateway {
 
+    private val moshi = Moshi.Builder().build()
+    private val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, String::class.java)
+    private val listAdapter = moshi.adapter<List<String>>(listType)
+
     // Simple cache for translations to avoid duplicate API calls
     private val translationCache = mutableMapOf<String, String>()
+
+    /**
+     * Translates multiple segments in bulk batches of 25 for extremely fast throughput,
+     * rate-limit prevention, and coherent conversational translation context.
+     */
+    suspend fun translateSegmentsBulk(
+        segments: List<String>,
+        targetLanguage: String,
+        tone: String,
+        preferredProvider: String = "DEEPSEEK"
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (segments.isEmpty()) return@withContext emptyList()
+
+        // Batch segments into chunks of 25 to optimize prompt length & LLM accuracy
+        val chunkSize = 25
+        val resultList = mutableListOf<String>()
+
+        for (i in segments.indices step chunkSize) {
+            val chunk = segments.subList(i, (i + chunkSize).coerceAtMost(segments.size))
+            val chunkTranslated = translateBatchWithFailover(chunk, targetLanguage, tone, preferredProvider)
+            resultList.addAll(chunkTranslated)
+        }
+
+        return@withContext resultList
+    }
+
+    private suspend fun translateBatchWithFailover(
+        batch: List<String>,
+        targetLanguage: String,
+        tone: String,
+        preferredProvider: String
+    ): List<String> {
+        val jsonInput = listAdapter.toJson(batch)
+        val prompt = ("You are an expert subtitle translator. Translate the following sequential list of subtitle lines to $targetLanguage.\n" +
+                "The translation tone must be '$tone'.\n\n" +
+                "IMPORTANT COMBINED RULES:\n" +
+                "1. Translate each line accurately and naturally based on the surrounding conversation context.\n" +
+                "2. Return the translation as a JSON array of strings: [\"translation1\", \"translation2\", ...]\n" +
+                "3. The number of elements in the output JSON array MUST be EXACTLY the same as the input (${batch.size} items).\n" +
+                "4. Do not change, merge, split, or omit any lines. Keep the indices 1:1 mapped.\n" +
+                "5. Return ONLY the valid JSON array starting with '[' and ending with ']'. Do not include markdown block markers (like ```json), notes, or descriptions.\n\n" +
+                "Input lines:\n$jsonInput")
+
+        val providersToTry = when (preferredProvider.uppercase()) {
+            "DEEPSEEK" -> listOf("DEEPSEEK", "MISTRAL", "GEMINI")
+            "MISTRAL" -> listOf("MISTRAL", "DEEPSEEK", "GEMINI")
+            else -> listOf("GEMINI", "DEEPSEEK", "MISTRAL")
+        }
+
+        var lastError: Throwable? = null
+
+        for (provider in providersToTry) {
+            try {
+                Log.d(TAG, "Attempting batch translation of ${batch.size} items with: $provider")
+                val responseText = when (provider) {
+                    "DEEPSEEK" -> callDeepSeek(prompt)
+                    "MISTRAL" -> callMistral(prompt)
+                    "GEMINI" -> callGemini(prompt)
+                    else -> null
+                }
+
+                if (!responseText.isNullOrEmpty()) {
+                    val cleaned = cleanJsonResponse(responseText)
+                    val list = listAdapter.fromJson(cleaned)
+                    if (list != null && list.size == batch.size) {
+                        return list
+                    } else {
+                        Log.e(TAG, "Size mismatch or invalid JSON. Expected: ${batch.size}, Got: ${list?.size ?: 0}")
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "Batch provider $provider failed: ${e.message}")
+                lastError = e
+                delay(200)
+            }
+        }
+
+        Log.e(TAG, "All batch translation providers failed! Falling back to elements translation.")
+        // Graceful element-by-element fallback
+        return batch.map { individual ->
+            try {
+                translateWithFailover(individual, targetLanguage, tone, preferredProvider)
+            } catch (e: Exception) {
+                individual + " (Translate Error)"
+            }
+        }
+    }
+
+    private fun cleanJsonResponse(raw: String): String {
+        var text = raw.trim()
+        if (text.startsWith("```json")) {
+            text = text.substringAfter("```json").substringBeforeLast("```").trim()
+        } else if (text.startsWith("```")) {
+            text = text.substringAfter("```").substringBeforeLast("```").trim()
+        }
+        val firstBracket = text.indexOf('[')
+        val lastBracket = text.lastIndexOf(']')
+        if (firstBracket != -1 && lastBracket != -1 && lastBracket > firstBracket) {
+            return text.substring(firstBracket, lastBracket + 1)
+        }
+        return text
+    }
 
     /**
      * Translates text with robust failover and self-healing.

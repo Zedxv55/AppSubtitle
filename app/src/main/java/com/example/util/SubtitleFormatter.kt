@@ -7,8 +7,8 @@ object SubtitleFormatter {
     fun jsonToSrt(segments: List<TranscriptionSegment>): String {
         val srtOutput = StringBuilder()
         for ((index, segment) in segments.withIndex()) {
-            val startTime = formatTimestamp(segment.start)
-            val endTime = formatTimestamp(segment.end)
+            val startTime = formatTimestamp(segment.start, ',')
+            val endTime = formatTimestamp(segment.end, ',')
             val text = segment.text.trim()
             
             srtOutput.append("${index + 1}\n")
@@ -18,7 +18,25 @@ object SubtitleFormatter {
         return srtOutput.toString()
     }
 
-    private fun formatTimestamp(seconds: Double): String {
+    fun jsonToVtt(segments: List<TranscriptionSegment>): String {
+        val vttOutput = StringBuilder("WEBVTT\n\n")
+        for ((index, segment) in segments.withIndex()) {
+            val startTime = formatTimestamp(segment.start, '.')
+            val endTime = formatTimestamp(segment.end, '.')
+            val text = segment.text.trim()
+            
+            vttOutput.append("${index + 1}\n")
+            vttOutput.append("$startTime --> $endTime\n")
+            vttOutput.append("$text\n\n")
+        }
+        return vttOutput.toString()
+    }
+
+    fun jsonToTxt(segments: List<TranscriptionSegment>): String {
+        return segments.joinToString(separator = "\n") { it.text.trim() }
+    }
+
+    private fun formatTimestamp(seconds: Double, msSeparator: Char): String {
         val totalSeconds = seconds.toLong()
         val hours = totalSeconds / 3600
         val remainingSeconds = totalSeconds % 3600
@@ -26,6 +44,6 @@ object SubtitleFormatter {
         val secs = remainingSeconds % 60
         val milliseconds = ((seconds - totalSeconds) * 1000).toInt()
 
-        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, minutes, secs, milliseconds)
+        return String.format(Locale.US, "%02d:%02d:%02d%c%03d", hours, minutes, secs, msSeparator, milliseconds)
     }
 }

@@ -15,7 +15,7 @@ interface GroqApi {
         @Header("Authorization") authHeader: String,
         @Part file: MultipartBody.Part,
         @Part("model") model: RequestBody,
-        @Part("language") language: RequestBody,
+        @Part("language") language: RequestBody?,
         @Part("response_format") responseFormat: RequestBody
     ): GroqTranscriptionResponse
 }

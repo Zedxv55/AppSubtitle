@@ -7,8 +7,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.api.*
+import com.example.db.*
 import com.example.util.AudioExtractor
 import com.example.util.SubtitleFormatter
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +42,72 @@ class SubtitleViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<SubtitleState>(SubtitleState.Idle)
     val uiState: StateFlow<SubtitleState> = _uiState.asStateFlow()
 
+    // For Subtitle History Database
+    private val _historyState = MutableStateFlow<List<SubtitleHistory>>(emptyList())
+    val historyState: StateFlow<List<SubtitleHistory>> = _historyState.asStateFlow()
+
+    private var historyRepository: SubtitleHistoryRepository? = null
+
+    private fun getHistoryRepository(context: Context): SubtitleHistoryRepository {
+        return historyRepository ?: synchronized(this) {
+            val r = historyRepository ?: SubtitleHistoryRepository(
+                AppDatabase.getDatabase(context.applicationContext).subtitleHistoryDao()
+            )
+            historyRepository = r
+            r
+        }
+    }
+
+    fun loadHistory(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                getHistoryRepository(context).allHistory.collect { list ->
+                    _historyState.value = list
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load history from database", e)
+            }
+        }
+    }
+
+    fun deleteHistoryItem(context: Context, item: SubtitleHistory) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                getHistoryRepository(context).delete(item)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to delete history item", e)
+            }
+        }
+    }
+
+    fun clearAllHistory(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                getHistoryRepository(context).clearAll()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear history", e)
+            }
+        }
+    }
+
+    fun loadHistoryItem(item: SubtitleHistory) {
+        try {
+            val types = Types.newParameterizedType(List::class.java, TranscriptionSegment::class.java)
+            val adapter = Moshi.Builder().build().adapter<List<TranscriptionSegment>>(types)
+            val loadedSegments = adapter.fromJson(item.segmentsJson) ?: emptyList()
+            _uiState.value = SubtitleState.Success(
+                subtitleText = item.srtContent,
+                segments = loadedSegments
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse loaded history item segments", e)
+            _uiState.value = SubtitleState.Success(
+                subtitleText = item.srtContent,
+                segments = emptyList()
+            )
+        }
+    }
+
     // For Karaoke Playback Preview
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -51,10 +120,12 @@ class SubtitleViewModel : ViewModel() {
     fun generateSubtitles(
         context: Context,
         mediaUri: Uri,
+        fileName: String,
         targetLanguage: String, // "None", "Thai", "English", "Japanese", "Chinese", "Korean"
         tone: String,           // "Casual", "Hype", "Formal", "Educational"
         preferredEngine: String, // "DEEPSEEK", "MISTRAL", "GEMINI"
-        burnSubtitles: Boolean = false
+        burnSubtitles: Boolean = false,
+        sourceLanguage: String = "Auto"
     ) {
         val applicationContext = context.applicationContext
         
@@ -69,8 +140,8 @@ class SubtitleViewModel : ViewModel() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Audio extraction failed, falling back to copying raw file", e)
                     // Fallback to plain copy
-                    val fileName = "temp_media_${System.currentTimeMillis()}.mp4"
-                    val rawCache = File(applicationContext.cacheDir, fileName)
+                    val fallbackName = "temp_media_${System.currentTimeMillis()}.mp4"
+                    val rawCache = File(applicationContext.cacheDir, fallbackName)
                     applicationContext.contentResolver.openInputStream(mediaUri)?.use { input ->
                         java.io.FileOutputStream(rawCache).use { output ->
                             input.copyTo(output)
@@ -112,7 +183,11 @@ class SubtitleViewModel : ViewModel() {
                 val filePart = MultipartBody.Part.createFormData("file", extractedAudioFile.name, requestFile)
                 
                 val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
-                val languagePart = "th".toRequestBody("text/plain".toMediaTypeOrNull()) // Initial transcription is Thai
+                val languagePart = if (sourceLanguage != "Auto") {
+                    sourceLanguage.toRequestBody("text/plain".toMediaTypeOrNull())
+                } else {
+                    null
+                }
                 val responseFormatPart = "verbose_json".toRequestBody("text/plain".toMediaTypeOrNull())
 
                 val groqResponse = RetrofitClients.groqApi.transcribeAudio(
@@ -128,12 +203,12 @@ class SubtitleViewModel : ViewModel() {
                     // Try whole text as single fallback segment if verbose segments are omitted
                     if (groqResponse.text.isNotEmpty()) {
                         val fallback = listOf(TranscriptionSegment(start = 0.0, end = 5.0, text = groqResponse.text))
-                        processTranslationAndExport(fallback, targetLanguage, tone, preferredEngine, burnSubtitles)
+                        processTranslationAndExport(applicationContext, fileName, fallback, targetLanguage, tone, preferredEngine, burnSubtitles)
                     } else {
                         _uiState.value = SubtitleState.Error("Transcription failed: no segments returned")
                     }
                 } else {
-                    processTranslationAndExport(segments, targetLanguage, tone, preferredEngine, burnSubtitles)
+                    processTranslationAndExport(applicationContext, fileName, segments, targetLanguage, tone, preferredEngine, burnSubtitles)
                 }
 
                 try { extractedAudioFile.delete() } catch (ignored: Exception) {}
@@ -146,6 +221,8 @@ class SubtitleViewModel : ViewModel() {
     }
 
     private suspend fun processTranslationAndExport(
+        context: Context,
+        fileName: String,
         segments: List<TranscriptionSegment>,
         targetLanguage: String,
         tone: String,
@@ -155,32 +232,48 @@ class SubtitleViewModel : ViewModel() {
         var finalSegments = segments
 
         if (targetLanguage != "None") {
-            _uiState.value = SubtitleState.Loading("Translating with $preferredEngine to $targetLanguage (Tone: $tone)...")
+            _uiState.value = SubtitleState.Loading("Translating with $preferredEngine to $targetLanguage (Tone: $tone) in fast bulk mode...")
 
-            val translatedSegments = mutableListOf<TranscriptionSegment>()
-            for ((index, segment) in segments.withIndex()) {
-                _uiState.value = SubtitleState.Loading(
-                    "Translating segment ${index + 1}/${segments.size} to $targetLanguage..."
-                )
-                
-                val translatedText = try {
-                    MultiProviderSpeechGateway.translateWithFailover(
-                        text = segment.text,
-                        targetLanguage = targetLanguage,
-                        tone = tone,
-                        preferredProvider = preferredEngine
-                    )
-                } catch (e: Exception) {
+            val sourceTexts = segments.map { it.text }
+            val translatedTexts = MultiProviderSpeechGateway.translateSegmentsBulk(
+                segments = sourceTexts,
+                targetLanguage = targetLanguage,
+                tone = tone,
+                preferredProvider = preferredEngine
+            )
+
+            val translatedSegments = segments.mapIndexed { index, segment ->
+                val translatedText = if (index in translatedTexts.indices) {
+                    translatedTexts[index]
+                } else {
                     segment.text + " (Translate Error)"
                 }
-                
-                translatedSegments.add(segment.copy(text = translatedText))
+                segment.copy(text = translatedText)
             }
             finalSegments = translatedSegments
         }
 
         _uiState.value = SubtitleState.Loading("Formatting SRT Subtitles...")
         val srtText = SubtitleFormatter.jsonToSrt(finalSegments)
+
+        // Save to Local Room Database History!
+        try {
+            val types = Types.newParameterizedType(List::class.java, TranscriptionSegment::class.java)
+            val adapter = Moshi.Builder().build().adapter<List<TranscriptionSegment>>(types)
+            val jsonStr = adapter.toJson(finalSegments)
+
+            val historyItem = SubtitleHistory(
+                fileName = fileName,
+                timestamp = System.currentTimeMillis(),
+                srtContent = srtText,
+                segmentsJson = jsonStr,
+                targetLanguage = targetLanguage,
+                engineUsed = preferredEngine
+            )
+            getHistoryRepository(context).insert(historyItem)
+        } catch (dbEx: Exception) {
+            Log.e(TAG, "Failed to save generated subtitles to local history database", dbEx)
+        }
 
         if (burnSubtitles) {
             _uiState.value = SubtitleState.Loading(
@@ -196,6 +289,56 @@ class SubtitleViewModel : ViewModel() {
                 subtitleText = srtText,
                 segments = finalSegments
             )
+        }
+    }
+
+    fun importSubtitleFile(context: Context, uri: Uri, fileName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = SubtitleState.Loading("กำลังนำเข้าและประมวลผลไฟล์ซับไตเติ้ล...")
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream == null) {
+                    _uiState.value = SubtitleState.Error("ไม่สามารถเปิดไฟล์ซับไตเติ้ลได้")
+                    return@launch
+                }
+                
+                val parsedSegments = com.example.util.SubtitleParser.parseSrtOrVtt(inputStream)
+                inputStream.close()
+                
+                if (parsedSegments.isEmpty()) {
+                    _uiState.value = SubtitleState.Error("ไฟล์ซับไตเติ้ลไม่มีข้อมูล หรือฟอร์แมตไม่ถูกต้อง")
+                    return@launch
+                }
+                
+                val srtText = SubtitleFormatter.jsonToSrt(parsedSegments)
+                
+                // Save to local history as imported
+                try {
+                    val types = Types.newParameterizedType(List::class.java, TranscriptionSegment::class.java)
+                    val adapter = Moshi.Builder().build().adapter<List<TranscriptionSegment>>(types)
+                    val jsonStr = adapter.toJson(parsedSegments)
+
+                    val historyItem = SubtitleHistory(
+                        fileName = "$fileName (Imported)",
+                        timestamp = System.currentTimeMillis(),
+                        srtContent = srtText,
+                        segmentsJson = jsonStr,
+                        targetLanguage = "None",
+                        engineUsed = "IMPORTED"
+                    )
+                    getHistoryRepository(context).insert(historyItem)
+                } catch (dbEx: Exception) {
+                    Log.e(TAG, "Failed to save imported subtitles to database", dbEx)
+                }
+                
+                _uiState.value = SubtitleState.Success(
+                    subtitleText = srtText,
+                    segments = parsedSegments
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to import subtitle file", e)
+                _uiState.value = SubtitleState.Error("เกิดข้อผิดพลาดในการโหลดไฟล์: ${e.message}")
+            }
         }
     }
 
@@ -217,11 +360,177 @@ class SubtitleViewModel : ViewModel() {
         }
     }
 
+    private fun smartSplitSpaceless(text: String, approxChars: Int): List<String> {
+        if (text.length <= approxChars) return listOf(text)
+        
+        val results = mutableListOf<String>()
+        var start = 0
+        val nonStartingChars = setOf(
+            '\u0e30', '\u0e31', '\u0e34', '\u0e35', '\u0e36', '\u0e37', '\u0e38', '\u0e39',
+            '\u0e47', '\u0e48', '\u0e49', '\u0e4a', '\u0e4b', '\u0e4c', '\u0e4d', '\u0e33', 
+            'ะ', 'ั', 'ิ', 'ี', 'ึ', 'ื', 'ุ', 'ู', '็', '่', '้', '๊', '๋', '์', 'า', 'ำ', 'ๆ'
+        )
+        
+        while (start < text.length) {
+            var end = start + approxChars
+            if (end >= text.length) {
+                results.add(text.substring(start))
+                break
+            }
+            
+            // Scan backwards a bit to see if we can find a space or a naturally good split point
+            var bestSplitIdx = -1
+            for (i in end downTo (start + approxChars / 2)) {
+                if (i < text.length && (text[i] == ' ' || text[i] == ',' || text[i] == '.' || text[i] == '-' || text[i] == '_')) {
+                    bestSplitIdx = i
+                    break
+                }
+                // Transition from English to Thai or Thai to English / Numbers
+                if (i > start && i < text.length) {
+                    val prev = text[i - 1]
+                    val curr = text[i]
+                    val isPrevEnglish = prev in 'a'..'z' || prev in 'A'..'Z'
+                    val isCurrEnglish = curr in 'a'..'z' || curr in 'A'..'Z'
+                    val isPrevThai = prev.code in 0x0E00..0x0E7F
+                    val isCurrThai = curr.code in 0x0E00..0x0E7F
+                    val isPrevDigit = prev.isDigit()
+                    val isCurrDigit = curr.isDigit()
+                    
+                    if ((isPrevEnglish && isCurrThai) || (isPrevThai && isCurrEnglish) || 
+                        (isPrevDigit != isCurrDigit)) {
+                        bestSplitIdx = i
+                        break
+                    }
+                }
+            }
+            
+            if (bestSplitIdx != -1) {
+                end = bestSplitIdx
+            } else {
+                // Adjust end index forward or backward so we don't start the next chunk with a combining character
+                while (end < text.length && nonStartingChars.contains(text[end])) {
+                    end++
+                }
+            }
+            
+            // Guard against infinite loops: ensure end has advanced
+            if (end <= start) {
+                end = start + 1
+            }
+
+            // Avoid adding empty strings/spaces
+            val chunk = text.substring(start, end).trim()
+            if (chunk.isNotEmpty()) {
+                results.add(chunk)
+            }
+            start = end
+            // Skip leading spaces in the next chunk
+            while (start < text.length && text[start] == ' ') {
+                start++
+            }
+        }
+        
+        return if (results.isEmpty()) listOf(text) else results
+    }
+
+    /**
+     * Re-chunks the subtitle segments so they don't exceed a specific maximum count of words
+     * or characters. This splits longer clauses proportionally across intermediate timestamps.
+     */
+    fun rechunkSegments(maxWords: Int) {
+        val currentState = _uiState.value
+        if (currentState is SubtitleState.Success) {
+            val originalSegments = currentState.segments
+            val newSegments = mutableListOf<TranscriptionSegment>()
+            
+            for (segment in originalSegments) {
+                val text = segment.text.trim()
+                if (text.isEmpty()) continue
+                
+                val hasSpaces = text.contains(" ")
+                
+                if (hasSpaces) {
+                    val words = text.split("\\s+".toRegex()).filter { it.isNotEmpty() }
+                    if (words.size <= maxWords || maxWords <= 0) {
+                        newSegments.add(segment)
+                    } else {
+                        val totalWords = words.size
+                        val chunked = words.chunked(maxWords)
+                        val duration = segment.end - segment.start
+                        var wordsProcessed = 0
+                        
+                        for (chunk in chunked) {
+                            val chunkWordCount = chunk.size
+                            val chunkStart = segment.start + (duration * wordsProcessed.toDouble() / totalWords.toDouble())
+                            wordsProcessed += chunkWordCount
+                            val chunkEnd = segment.start + (duration * wordsProcessed.toDouble() / totalWords.toDouble())
+                            
+                            newSegments.add(
+                                TranscriptionSegment(
+                                    start = chunkStart,
+                                    end = chunkEnd,
+                                    text = chunk.joinToString(" ")
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    // Spaceless continuous text (Thai, Chinese, etc.)
+                    // Map "maxWords" roughly to character counts: 1 word ~ 4-5 Thai characters
+                    val approxChars = if (maxWords <= 0) 15 else maxWords * 4
+                    if (text.length <= approxChars) {
+                        newSegments.add(segment)
+                    } else {
+                        val chunks = smartSplitSpaceless(text, approxChars)
+                        val totalChars = text.length
+                        val duration = segment.end - segment.start
+                        var charsProcessed = 0
+                        
+                        for (chunk in chunks) {
+                            val chunkSize = chunk.length
+                            val chunkStart = segment.start + (duration * charsProcessed.toDouble() / totalChars.toDouble())
+                            charsProcessed += chunkSize
+                            val chunkEnd = segment.start + (duration * charsProcessed.toDouble() / totalChars.toDouble())
+                            
+                            newSegments.add(
+                                TranscriptionSegment(
+                                    start = chunkStart,
+                                    end = chunkEnd,
+                                    text = chunk
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Deduplicate/sanitize timestamps slightly
+            val sanitized = newSegments.mapIndexed { i, s ->
+                val nextStart = newSegments.getOrNull(i + 1)?.start ?: (s.end + 1.0)
+                if (s.end > nextStart) s.copy(end = nextStart) else s
+            }
+
+            val newSrtText = SubtitleFormatter.jsonToSrt(sanitized)
+            _uiState.value = SubtitleState.Success(
+                subtitleText = newSrtText,
+                segments = sanitized
+            )
+        }
+    }
+
     // --- Karaoke Playback Controls ---
 
-    fun startPlaybackSimulation(maxDurationSeconds: Double) {
+    fun seekToPosition(seconds: Double) {
+        _currentPlayTimeSeconds.value = seconds
+    }
+
+    fun startPlaybackSimulation(maxDurationSeconds: Double, isVideoAttached: Boolean = false) {
         playbackJob?.cancel()
         _isPlaying.value = true
+        if (isVideoAttached) {
+            // Let the attached media player drive playback progress
+            return
+        }
         _currentPlayTimeSeconds.value = 0.0
 
         playbackJob = viewModelScope.launch(Dispatchers.Default) {
