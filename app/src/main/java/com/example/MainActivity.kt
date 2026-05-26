@@ -1101,7 +1101,8 @@ fun SubtitleOverlayText(
     fontName: String = "SansSerif",
     colorName: String = "Yellow",
     fontSizeSp: Int = 20,
-    bgOpacity: Float = 0.65f
+    bgOpacity: Float = 0.65f,
+    shadowEnabled: Boolean = true
 ) {
     val fontFamily = when (fontName) {
         "Serif" -> FontFamily.Serif
@@ -1131,7 +1132,18 @@ fun SubtitleOverlayText(
             fontWeight = FontWeight.ExtraBold,
             fontFamily = fontFamily,
             color = textColor,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            style = if (shadowEnabled) {
+                TextStyle(
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = Color.Black,
+                        offset = androidx.compose.ui.geometry.Offset(3f, 3f),
+                        blurRadius = 6f
+                    )
+                )
+            } else {
+                TextStyle.Default
+            }
         )
     }
 }
@@ -1152,6 +1164,9 @@ fun VideoPlayerWithSubtitles(
     fontSizeSp: Int,
     bgOpacity: Float,
     videoAspectRatio: String,
+    videoPosition: String = "Bottom",
+    videoOffsetDp: Float = 24f,
+    shadowEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1274,11 +1289,21 @@ fun VideoPlayerWithSubtitles(
 
         // Render Custom Subtitles layer dynamically over the video with custom font properties
         if (!activeSegmentText.isNullOrEmpty()) {
+            val contentAlignment = when (videoPosition) {
+                "Top" -> Alignment.TopCenter
+                "Middle" -> Alignment.Center
+                else -> Alignment.BottomCenter
+            }
+            val paddingModifier = when (videoPosition) {
+                "Top" -> Modifier.padding(top = videoOffsetDp.dp, start = 16.dp, end = 16.dp)
+                "Bottom" -> Modifier.padding(bottom = videoOffsetDp.dp, start = 16.dp, end = 16.dp)
+                else -> Modifier.padding(start = 16.dp, end = 16.dp)
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 24.dp, start = 16.dp, end = 16.dp),
-                contentAlignment = Alignment.BottomCenter
+                    .then(paddingModifier),
+                contentAlignment = contentAlignment
             ) {
                 SubtitleOverlayText(
                     text = activeSegmentText,
@@ -1286,7 +1311,8 @@ fun VideoPlayerWithSubtitles(
                     fontName = fontName,
                     colorName = colorName,
                     fontSizeSp = fontSizeSp,
-                    bgOpacity = bgOpacity
+                    bgOpacity = bgOpacity,
+                    shadowEnabled = shadowEnabled
                 )
             }
         }
@@ -1318,6 +1344,9 @@ fun KaraokePreviewAndEditor(
     var selectedFontSize by remember { mutableStateOf(20) }
     var selectedBgOpacity by remember { mutableStateOf(0.65f) }
     var videoAspectRatio by remember { mutableStateOf("16:9") }
+    var selectedPosition by remember { mutableStateOf("Bottom") }
+    var selectedOffsetDp by remember { mutableStateOf(24f) }
+    var shadowEnabled by remember { mutableStateOf(true) }
 
     // On-the-fly customizable video capability
     var attachedVideoUri by remember { mutableStateOf<Uri?>(null) }
@@ -1346,6 +1375,41 @@ fun KaraokePreviewAndEditor(
     LaunchedEffect(videoUri) {
         if (videoUri != null) {
             attachedVideoUri = videoUri
+        }
+    }
+
+    LaunchedEffect(attachedVideoUri) {
+        attachedVideoUri?.let { uri ->
+            try {
+                val detectedRatio = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val retriever = android.media.MediaMetadataRetriever()
+                        retriever.setDataSource(context, uri)
+                        val widthStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                        val heightStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                        val rotationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                        retriever.release()
+
+                        val width = widthStr?.toIntOrNull() ?: 1920
+                        val height = heightStr?.toIntOrNull() ?: 1080
+                        val rotation = rotationStr?.toIntOrNull() ?: 0
+
+                        val (actualWidth, actualHeight) = if (rotation == 90 || rotation == 270) {
+                            Pair(height, width)
+                        } else {
+                            Pair(width, height)
+                        }
+
+                        if (actualHeight > actualWidth) "9:16" else "16:9"
+                    } catch (e: Exception) {
+                        android.util.Log.e("AspectDetectLocal", "Failed to retrieve video metadata", e)
+                        "16:9"
+                    }
+                }
+                videoAspectRatio = detectedRatio
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
     }
 
@@ -1563,6 +1627,76 @@ fun KaraokePreviewAndEditor(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // 📍 Subtitle Position & Shadow Settings
+                Text(
+                    text = "📍 ตำแหน่งและเงาของซับไตเติล (Position & Shadows)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("Bottom", "Middle", "Top").forEach { pos ->
+                        FilterChip(
+                            selected = selectedPosition == pos,
+                            onClick = { selectedPosition = pos },
+                            label = { Text(if (pos == "Bottom") "ด้านล่าง (Bottom)" else if (pos == "Middle") "กึ่งกลาง (Middle)" else "ด้านบน (Top)") },
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1.2f)) {
+                        Text(
+                            text = "📐 ระยะขอบ (${selectedOffsetDp.toInt()}dp)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Slider(
+                            value = selectedOffsetDp,
+                            onValueChange = { selectedOffsetDp = it },
+                            valueRange = 8f..120f,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                    
+                    Column(modifier = Modifier.weight(0.8f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { shadowEnabled = !shadowEnabled }
+                        ) {
+                            Checkbox(
+                                checked = shadowEnabled,
+                                onCheckedChange = { shadowEnabled = it },
+                                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Text(
+                                text = "แสดงเงาหลังอักษร",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // 📏 Smart Segment Splitting
                 Text(
                     text = "✂️ กำหนดและจัดแบ่งประโยคกี่คำ (Smart Word Splitter)",
@@ -1664,6 +1798,9 @@ fun KaraokePreviewAndEditor(
                         fontSizeSp = selectedFontSize,
                         bgOpacity = selectedBgOpacity,
                         videoAspectRatio = videoAspectRatio,
+                        videoPosition = selectedPosition,
+                        videoOffsetDp = selectedOffsetDp,
+                        shadowEnabled = shadowEnabled,
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
@@ -1683,7 +1820,8 @@ fun KaraokePreviewAndEditor(
                                 fontName = selectedFont,
                                 colorName = selectedColor,
                                 fontSizeSp = selectedFontSize,
-                                bgOpacity = selectedBgOpacity
+                                bgOpacity = selectedBgOpacity,
+                                shadowEnabled = shadowEnabled
                             )
                         } else {
                             Text(
