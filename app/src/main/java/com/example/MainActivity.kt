@@ -1230,7 +1230,7 @@ fun VideoPlayerWithSubtitles(
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
             try {
-                while (true) {
+                while (coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
                     val currentPosSeconds = exoPlayer.currentPosition.toDouble() / 1000.0
                     onPositionChanged(currentPosSeconds)
                     kotlinx.coroutines.delay(50L) // Outstanding 50ms polling rate!
@@ -1328,6 +1328,7 @@ fun KaraokePreviewAndEditor(
     var searchQuery by remember { mutableStateOf("") }
     var autoFollowActiveSegment by remember { mutableStateOf(true) }
     var manualSeekTime by remember { mutableStateOf<Double?>(null) }
+    var targetWordsLimit by remember { mutableStateOf(5) }
 
     val activeSegmentIdx = remember(playTime, segments) {
         segments.indexOfFirst { playTime >= it.start && playTime <= it.end }
@@ -1575,8 +1576,6 @@ fun KaraokePreviewAndEditor(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                     modifier = Modifier.padding(bottom = 6.dp)
                 )
-                
-                var targetWordsLimit by remember { mutableStateOf(5) }
                 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),

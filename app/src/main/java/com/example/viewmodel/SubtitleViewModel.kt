@@ -190,21 +190,26 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
                 val filePart = MultipartBody.Part.createFormData("file", extractedAudioFile.name, requestFile)
                 
                 val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
-                val languagePart = if (sourceLanguage != "Auto") {
-                    sourceLanguage.toRequestBody("text/plain".toMediaTypeOrNull())
-                } else {
-                    null
-                }
                 val responseFormatPart = "verbose_json".toRequestBody("text/plain".toMediaTypeOrNull())
 
                 val groqResponse = withContext(Dispatchers.IO) {
-                    RetrofitClients.groqApi.transcribeAudio(
-                        authHeader = "Bearer $groqKey",
-                        file = filePart,
-                        model = modelPart,
-                        language = languagePart,
-                        responseFormat = responseFormatPart
-                    )
+                    if (sourceLanguage != "Auto") {
+                        val languagePart = sourceLanguage.toRequestBody("text/plain".toMediaTypeOrNull())
+                        RetrofitClients.groqApi.transcribeAudioWithLanguage(
+                            authHeader = "Bearer $groqKey",
+                            file = filePart,
+                            model = modelPart,
+                            language = languagePart,
+                            responseFormat = responseFormatPart
+                        )
+                    } else {
+                        RetrofitClients.groqApi.transcribeAudio(
+                            authHeader = "Bearer $groqKey",
+                            file = filePart,
+                            model = modelPart,
+                            responseFormat = responseFormatPart
+                        )
+                    }
                 }
 
                 val segments = groqResponse.segments
