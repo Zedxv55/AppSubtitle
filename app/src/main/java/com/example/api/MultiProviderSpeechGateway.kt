@@ -80,8 +80,15 @@ object MultiProviderSpeechGateway {
     private val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, String::class.java)
     private val listAdapter = moshi.adapter<List<String>>(listType)
 
-    // Simple cache for translations to avoid duplicate API calls
-    private val translationCache = mutableMapOf<String, String>()
+    // Simple thread-safe LRU cache for translations to avoid duplicate API calls & excessive memory usage
+    private val translationCache = android.util.LruCache<String, String>(1000)
+
+    private fun isKeyValid(key: String, placeholderDefault: String): Boolean {
+        if (key.isEmpty()) return false
+        val upper = key.uppercase().trim()
+        val upperPlaceholder = placeholderDefault.uppercase().trim()
+        return !upper.startsWith("YOUR_") && !upper.startsWith("MY_") && !upper.startsWith("PLACEHOLDER") && upper != upperPlaceholder
+    }
 
     /**
      * Translates multiple segments in bulk batches of 25 for extremely fast throughput,
@@ -199,7 +206,7 @@ object MultiProviderSpeechGateway {
         if (trimmed.isEmpty()) return@withContext ""
 
         val cacheKey = "$targetLanguage-$tone-${trimmed.hashCode()}"
-        translationCache[cacheKey]?.let {
+        translationCache.get(cacheKey)?.let {
             Log.d(TAG, "Translation Cache hit for: $trimmed")
             return@withContext it
         }
@@ -228,7 +235,7 @@ object MultiProviderSpeechGateway {
                 }
 
                 if (resultText != null && resultText.isNotEmpty()) {
-                    translationCache[cacheKey] = resultText
+                    translationCache.put(cacheKey, resultText)
                     return@withContext resultText
                 }
             } catch (e: Throwable) {
@@ -245,8 +252,8 @@ object MultiProviderSpeechGateway {
 
     private suspend fun callDeepSeek(prompt: String): String? {
         val key = BuildConfig.DEEPSEEK_API_KEY
-        if (key.isEmpty() || key.startsWith("YOUR_")) {
-            Log.w(TAG, "DeepSeek Key is empty; skipping.")
+        if (!isKeyValid(key, "YOUR_DEEPSEEK_API_KEY")) {
+            Log.w(TAG, "DeepSeek Key is empty or placeholder; skipping.")
             return null
         }
 
@@ -261,8 +268,8 @@ object MultiProviderSpeechGateway {
 
     private suspend fun callMistral(prompt: String): String? {
         val key = BuildConfig.MISTRAL_API_KEY
-        if (key.isEmpty() || key.startsWith("YOUR_")) {
-            Log.w(TAG, "Mistral Key is empty; skipping.")
+        if (!isKeyValid(key, "YOUR_MISTRAL_API_KEY")) {
+            Log.w(TAG, "Mistral Key is empty or placeholder; skipping.")
             return null
         }
 
@@ -277,8 +284,8 @@ object MultiProviderSpeechGateway {
 
     private suspend fun callGemini(prompt: String): String? {
         val key = BuildConfig.GEMINI_API_KEY
-        if (key.isEmpty() || key.startsWith("MY_")) {
-            Log.w(TAG, "Gemini Key is empty; skipping.")
+        if (!isKeyValid(key, "YOUR_GEMINI_API_KEY")) {
+            Log.w(TAG, "Gemini Key is empty or placeholder; skipping.")
             return null
         }
 
@@ -298,6 +305,6 @@ object MultiProviderSpeechGateway {
      * Clears local translation caches.
      */
     fun clearCache() {
-        translationCache.clear()
+        translationCache.evictAll()
     }
 }

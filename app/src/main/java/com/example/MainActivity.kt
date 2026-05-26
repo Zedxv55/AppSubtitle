@@ -77,7 +77,7 @@ fun AutoSubtitleScreen(
     val history by viewModel.historyState.collectAsState()
 
     LaunchedEffect(Unit) {
-        viewModel.loadHistory(context)
+        viewModel.loadHistory()
     }
 
     var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
@@ -142,7 +142,7 @@ fun AutoSubtitleScreen(
             } catch (e: Exception) {
                 // Ignore
             }
-            viewModel.importSubtitleFile(context, it, srtFileName)
+            viewModel.importSubtitleFile(it, srtFileName)
         }
     }
 
@@ -598,7 +598,6 @@ fun AutoSubtitleScreen(
                         onClick = {
                             selectedFileUri?.let { uri ->
                                 viewModel.generateSubtitles(
-                                    context = context,
                                     mediaUri = uri,
                                     fileName = fileName,
                                     targetLanguage = targetLanguage,
@@ -816,7 +815,7 @@ fun AutoSubtitleScreen(
 
                 if (history.isNotEmpty()) {
                     TextButton(
-                        onClick = { viewModel.clearAllHistory(context) }
+                        onClick = { viewModel.clearAllHistory() }
                     ) {
                         Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
@@ -904,7 +903,7 @@ fun AutoSubtitleScreen(
                                     }
                                     
                                     IconButton(
-                                        onClick = { viewModel.deleteHistoryItem(context, item) },
+                                        onClick = { viewModel.deleteHistoryItem(item) },
                                         modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(

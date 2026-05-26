@@ -15,10 +15,6 @@ object SubtitleParser {
         var currentStart = -1.0
         var currentEnd = -1.0
         
-        // Match timestamps like 00:00:00,000 --> 00:00:00,000 or 00:00.000
-        val timestampRegex = """(\d+:\d+:\d+[\.,]\d+)[\s-]*-->[\s-]*(\d+:\d+:\d+[\.,]\d+)""".toRegex()
-        val shortTimestampRegex = """(\d+:\d+[\.,]\d+)[\s-]*-->[\s-]*(\d+:\d+[\.,]\d+)""".toRegex()
-        
         while (reader.readLine().also { line = it } != null) {
             val trimmed = line!!.trim()
             if (trimmed.isEmpty()) {
@@ -37,11 +33,20 @@ object SubtitleParser {
                 continue
             }
             
-            val matchResult = timestampRegex.find(trimmed) ?: shortTimestampRegex.find(trimmed)
-            if (matchResult != null) {
-                // Parse start and end times
-                currentStart = parseTimeToSeconds(matchResult.groupValues[1])
-                currentEnd = parseTimeToSeconds(matchResult.groupValues[2])
+            if (trimmed.contains("-->")) {
+                val parts = trimmed.split("-->")
+                if (parts.size >= 2) {
+                    val startStr = parts[0].trim()
+                    val endSettingsStr = parts[1].trim()
+                    // Strip extra VTT styling settings if present
+                    val endStr = if (endSettingsStr.contains(" ")) {
+                        endSettingsStr.split(" ")[0].trim()
+                    } else {
+                        endSettingsStr
+                    }
+                    currentStart = parseTimeToSeconds(startStr)
+                    currentEnd = parseTimeToSeconds(endStr)
+                }
             } else if (trimmed.all { it.isDigit() }) {
                 // Probably line number, ignore
             } else if (trimmed.equals("WEBVTT", ignoreCase = true)) {
@@ -70,19 +75,22 @@ object SubtitleParser {
     
     private fun parseTimeToSeconds(timeStr: String): Double {
         try {
-            val parts = timeStr.replace(',', '.').split(":")
+            val cleaned = timeStr.trim().replace(',', '.')
+            val parts = cleaned.split(":")
             if (parts.size == 3) {
-                val hours = parts[0].toInt()
-                val minutes = parts[1].toInt()
-                val secs = parts[2].toDouble()
+                val hours = parts[0].toIntOrNull() ?: 0
+                val minutes = parts[1].toIntOrNull() ?: 0
+                val secs = parts[2].toDoubleOrNull() ?: 0.0
                 return hours * 3600.0 + minutes * 60.0 + secs
             } else if (parts.size == 2) {
-                val minutes = parts[0].toInt()
-                val secs = parts[1].toDouble()
+                val minutes = parts[0].toIntOrNull() ?: 0
+                val secs = parts[1].toDoubleOrNull() ?: 0.0
                 return minutes * 60.0 + secs
+            } else if (parts.size == 1) {
+                return parts[0].toDoubleOrNull() ?: 0.0
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("SubtitleParser", "Error parsing time: $timeStr", e)
         }
         return 0.0
     }

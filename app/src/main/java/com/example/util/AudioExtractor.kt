@@ -73,7 +73,9 @@ object AudioExtractor {
                 try {
                     muxer.stop()
                     muxer.release()
-                } catch (ignored: Exception) {}
+                } catch (e: Exception) {
+                    android.util.Log.e("AudioExtractor", "Muxer release failed", e)
+                }
             }
         } finally {
             extractor.release()

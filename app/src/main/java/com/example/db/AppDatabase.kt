@@ -20,7 +20,10 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "easysubtitles_database"
                 )
+                // Room fallback strategy: safe destructive migration prioritizes avoiding crashes
+                // on schema drift, paired with downgrade destruction safety for robust development feedback.
                 .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 INSTANCE = instance
                 instance
