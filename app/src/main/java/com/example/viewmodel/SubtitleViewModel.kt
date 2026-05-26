@@ -115,6 +115,12 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
     val currentPlayTimeSeconds: StateFlow<Double> = _currentPlayTimeSeconds.asStateFlow()
 
     private var playbackJob: Job? = null
+    private var currentJob: Job? = null
+
+    fun cancelJob() {
+        currentJob?.cancel()
+        _uiState.value = SubtitleState.Idle
+    }
 
     fun generateSubtitles(
         mediaUri: Uri,
@@ -127,7 +133,7 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
     ) {
         val applicationContext = getApplication<Application>()
         
-        viewModelScope.launch {
+        currentJob = viewModelScope.launch {
             try {
                 _uiState.value = SubtitleState.Loading("Auto-compressing and extracting audio...")
                 
@@ -187,29 +193,21 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
 
                 val mediaType = "audio/mpeg".toMediaTypeOrNull()
                 val requestFile = extractedAudioFile.asRequestBody(mediaType)
-                val filePart = MultipartBody.Part.createFormData("file", extractedAudioFile.name, requestFile)
                 
-                val modelPart = "whisper-large-v3".toRequestBody("text/plain".toMediaTypeOrNull())
-                val responseFormatPart = "verbose_json".toRequestBody("text/plain".toMediaTypeOrNull())
+                val parts = mutableListOf<MultipartBody.Part>()
+                parts.add(MultipartBody.Part.createFormData("file", extractedAudioFile.name, requestFile))
+                parts.add(MultipartBody.Part.createFormData("model", "whisper-large-v3"))
+                parts.add(MultipartBody.Part.createFormData("response_format", "verbose_json"))
+                
+                if (sourceLanguage != "Auto") {
+                    parts.add(MultipartBody.Part.createFormData("language", sourceLanguage))
+                }
 
                 val groqResponse = withContext(Dispatchers.IO) {
-                    if (sourceLanguage != "Auto") {
-                        val languagePart = sourceLanguage.toRequestBody("text/plain".toMediaTypeOrNull())
-                        RetrofitClients.groqApi.transcribeAudioWithLanguage(
-                            authHeader = "Bearer $groqKey",
-                            file = filePart,
-                            model = modelPart,
-                            language = languagePart,
-                            responseFormat = responseFormatPart
-                        )
-                    } else {
-                        RetrofitClients.groqApi.transcribeAudio(
-                            authHeader = "Bearer $groqKey",
-                            file = filePart,
-                            model = modelPart,
-                            responseFormat = responseFormatPart
-                        )
-                    }
+                    RetrofitClients.groqApi.transcribeAudio(
+                        authHeader = "Bearer $groqKey",
+                        parts = parts
+                    )
                 }
 
                 val segments = groqResponse.segments

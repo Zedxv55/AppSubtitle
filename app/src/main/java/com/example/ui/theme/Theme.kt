@@ -13,53 +13,29 @@ import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme =
   darkColorScheme(
-    primary = MintBlue,
-    secondary = MintBlueDark,
-    tertiary = MintBlueLight,
-    background = BlackBackground,
-    surface = DarkSurface,
-    surfaceVariant = DarkSurfaceVariant,
+    primary = AccentColor,
+    secondary = BlueGradientEnd,
+    tertiary = AccentColor,
+    background = AmoledBackground,
+    surface = AmoledSurface,
+    surfaceVariant = AmoledSurfaceVariant,
     onPrimary = Color.Black,
     onSecondary = Color.Black,
     onTertiary = Color.Black,
-    onBackground = TextPrimaryDark,
-    onSurface = TextPrimaryDark,
-    onSurfaceVariant = TextPrimaryDark
-  )
-
-private val LightColorScheme =
-  lightColorScheme(
-    primary = MintBlueDark,
-    secondary = MintBlue,
-    tertiary = MintBlueLight,
-    background = WhiteBackground,
-    surface = LightSurface,
-    surfaceVariant = LightSurfaceVariant,
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = TextPrimaryLight,
-    onSurface = TextPrimaryLight,
-    onSurfaceVariant = TextPrimaryLight,
+    onBackground = TextPrimary,
+    onSurface = TextPrimary,
+    onSurfaceVariant = TextSecondary,
+    outline = AmoledBorderColor,
+    outlineVariant = AmoledBorderColor
   )
 
 @Composable
 fun MyApplicationTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
-  // Dynamic color is available on Android 12+
+  darkTheme: Boolean = true,
   dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
-  val colorScheme =
-    when {
-      dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-        val context = LocalContext.current
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-      }
-
-      darkTheme -> DarkColorScheme
-      else -> LightColorScheme
-    }
+  val colorScheme = DarkColorScheme
 
   MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }

@@ -13,19 +13,7 @@ interface GroqApi {
     @POST("audio/transcriptions")
     suspend fun transcribeAudio(
         @Header("Authorization") authHeader: String,
-        @Part file: MultipartBody.Part,
-        @Part("model") model: RequestBody,
-        @Part("response_format") responseFormat: RequestBody
-    ): GroqTranscriptionResponse
-
-    @Multipart
-    @POST("audio/transcriptions")
-    suspend fun transcribeAudioWithLanguage(
-        @Header("Authorization") authHeader: String,
-        @Part file: MultipartBody.Part,
-        @Part("model") model: RequestBody,
-        @Part("language") language: RequestBody,
-        @Part("response_format") responseFormat: RequestBody
+        @Part parts: List<MultipartBody.Part>
     ): GroqTranscriptionResponse
 }
 

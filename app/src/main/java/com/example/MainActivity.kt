@@ -32,6 +32,26 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.animateColor
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import kotlinx.coroutines.flow.debounce
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
@@ -163,346 +183,659 @@ fun AutoSubtitleScreen(
         }
     }
 
+    val AmoledBackground = Color(0xFF080B12)
+    val AmoledSurface = Color(0xFF0F1825)
+    val AmoledSurfaceVariant = Color(0xFF131F2E)
+    val AmoledBorderColor = Color(0xFF1E4060)
+    val AccentColor = Color(0xFF00E5B4)
+    val BlueGradientEnd = Color(0xFF00A3FF)
+    val TextPrimary = Color(0xFFE0E8F0)
+    val TextSecondary = Color(0xFF4A6A7A)
+    val GradientTealBlue = Brush.horizontalGradient(listOf(Color(0xFF00E5B4), Color(0xFF00A3FF)))
+
     val gradientBrush = Brush.horizontalGradient(
         colors = listOf(
-            MaterialTheme.colorScheme.primary,
-            MaterialTheme.colorScheme.tertiary
+            AccentColor,
+            BlueGradientEnd
         )
     )
 
-    Column(
+    // Breathing scale animation for Logo icon
+    val infiniteTransition = rememberInfiniteTransition(label = "globalAnimations")
+    val scaleAnim by infiniteTransition.animateFloat(
+        initialValue = 0.97f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "logoBreathing"
+    )
+
+    // Animated color cycle for dashed border cycling when empty
+    val borderColorAnim by infiniteTransition.animateColor(
+        initialValue = Color(0xFF1E4060),
+        targetValue = Color(0xFF00E5B4),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowBorder"
+    )
+
+    // Infinite rotation for spinning ring
+    val rotationAnim by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ringRotation"
+    )
+
+    val stateType = remember(uiState) {
+        when (uiState) {
+            is SubtitleState.Idle -> "home"
+            is SubtitleState.Error -> "home"
+            is SubtitleState.Loading -> "loading"
+            is SubtitleState.Success -> "result"
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(AmoledBackground)
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        // Brand Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 24.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .background(gradientBrush, shape = CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ClosedCaption,
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "EASY AI Subtitles",
-                style = TextStyle(
-                    brush = gradientBrush,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            )
-        }
-        
-        Text(
-            text = "สร้างมาเพื่อครีเอเตอร์ แปลและเบิร์นในแอปเดียว",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Step 1 Layout
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            StepHeader(number = "01", title = "อัปโหลดไฟล์วิดีโอหรือเสียง (Any size)")
-            
-            ElevatedCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { filePickerLauncher.launch("*/*") }
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        RoundedCornerShape(20.dp)
-                    ),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .padding(20.dp)
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (selectedFileUri != null) {
-                        Icon(
-                            imageVector = if (isVideo) Icons.Default.Movie else Icons.Default.AudioFile,
-                            contentDescription = "Media Icon",
-                            modifier = Modifier.size(56.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = fileName,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 4.dp)
-                        ) {
-                            SuggestionChip(
-                                onClick = {},
-                                label = { Text(if (isVideo) "VIDEO" else "AUDIO") }
-                            )
-                            SuggestionChip(
-                                onClick = {},
-                                label = { Text(rawFileSizeStr) }
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "💡 Auto-compressed using native extractor",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.CloudUpload,
-                            contentDescription = "Upload Icon",
-                            modifier = Modifier.size(56.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "เลือกไฟล์วิดีโอ/เสียง หรือ นำเข้าไฟล์ซับไตเติ้ล",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "รองรับวิดีโอขนาดใหญ่ หรือเปิดไฟล์ซับ SRT / VTT เพื่อพรีวิว แก้ไขคำ และดาวน์โหลดใหม่ ได้ทันที",
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                        
+        AnimatedContent(
+            targetState = stateType,
+            transitionSpec = {
+                (slideInHorizontally(initialOffsetX = { it }) + fadeIn()) togetherWith
+                        (slideOutHorizontally(targetOffsetX = { -it }) + fadeOut())
+            },
+            label = "screen_transition"
+        ) { targetScreen ->
+            when (targetScreen) {
+                "home" -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Header (App Name / Hero title: 20sp ExtraBold letter-spacing -0.5)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Button(
-                                onClick = { filePickerLauncher.launch("*/*") },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.1f),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
-                            ) {
-                                Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("เลือกไฟล์แกะซับ", fontSize = 12.sp, maxLines = 1)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .scale(scaleAnim)
+                                        .size(32.dp)
+                                        .background(gradientBrush, RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ClosedCaption,
+                                        contentDescription = null,
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "SubAI",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = TextPrimary,
+                                    letterSpacing = (-0.5).sp
+                                )
                             }
                             
-                            OutlinedButton(
-                                onClick = { srtPickerLauncher.launch("*/*") },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.primary
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(AmoledSurfaceVariant, CircleShape)
+                                    .border(1.dp, AmoledBorderColor, CircleShape),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("นำเข้าซับ SRT/VTT", fontSize = 12.sp, maxLines = 1)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Step 2 Layout
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            StepHeader(number = "02", title = "ตั้งค่า AI แปลภาษา (Ultra Precision)")
-            
-            ElevatedCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        RoundedCornerShape(20.dp)
-                    ),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    
-                    // Original Audio Language Selection
-                    Text(
-                        text = "Spoken Audio Language (ภาษาพูดในวิดีโอหลัก)",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        sourceLanguages.forEach { lang ->
-                            val display = when (lang) {
-                                "Auto" -> "Auto (ตรวจจับภาษาอัตโนมัติ)"
-                                "th" -> "Thai (ภาษาไทย)"
-                                "en" -> "English (ภาษาอังกฤษ)"
-                                else -> lang
-                            }
-                            FilterChip(
-                                selected = sourceLanguage == lang,
-                                onClick = { sourceLanguage = lang },
-                                label = { Text(display) },
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Language Choice
-                    Text(
-                        text = "Translate to (ภาษาที่ต้องการแปล)",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        languages.forEach { lang ->
-                            FilterChip(
-                                selected = targetLanguage == lang,
-                                onClick = { targetLanguage = lang },
-                                label = { Text(if (lang == "None") "Original (ต้นฉบับ)" else lang) },
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Engine Selection Group
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "AI Translation Engine",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(6.dp)
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = AccentColor,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "Auto-Heal Active",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
+                            }
                         }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        engines.forEach { eng ->
+
+                        if (uiState is SubtitleState.Error) {
+                            val errorState = uiState as SubtitleState.Error
+                            val errorMsg = errorState.error
                             ElevatedCard(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { selectedEngine = eng }
-                                    .border(
-                                        if (selectedEngine == eng) 2.dp else 1.dp,
-                                        if (selectedEngine == eng) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha=0.3f),
-                                        RoundedCornerShape(12.dp)
-                                    ),
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    .border(1.dp, Color.Red, RoundedCornerShape(12.dp)),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.elevatedCardColors(
-                                    containerColor = if (selectedEngine == eng) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surface
-                                    }
-                                )
+                                colors = CardDefaults.elevatedCardColors(containerColor = Color(0x33FF0000))
                             ) {
+                                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Error, "error", tint = Color.Red, modifier = Modifier.size(28.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text("เกิดข้อผิดพลาดในการรันงาน:", fontWeight = FontWeight.Bold, color = Color.Red, fontSize = 13.sp)
+                                        Text(errorMsg, color = Color.Red, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Upload Zone Card
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .clickable { filePickerLauncher.launch("*/*") }
+                                .drawBehind {
+                                    val stroke = Stroke(
+                                        width = 1.5.dp.toPx(),
+                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                    )
+                                    drawRoundRect(
+                                        color = if (selectedFileUri == null) borderColorAnim else AmoledBorderColor,
+                                        style = stroke,
+                                        cornerRadius = CornerRadius(18.dp.toPx())
+                                    )
+                                },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = AmoledSurface)
+                        ) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 12.dp),
+                                        .height(2.dp)
+                                        .background(Brush.horizontalGradient(listOf(Color.Transparent, AccentColor, Color.Transparent)))
+                                )
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    if (selectedFileUri != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .background(GradientTealBlue, RoundedCornerShape(12.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isVideo) Icons.Default.Movie else Icons.Default.AudioFile,
+                                                contentDescription = "Selected file",
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = fileName,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(AmoledSurfaceVariant, RoundedCornerShape(6.dp))
+                                                    .border(1.dp, AmoledBorderColor, RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(rawFileSizeStr, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(AmoledSurfaceVariant, RoundedCornerShape(6.dp))
+                                                    .border(1.dp, AmoledBorderColor, RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(if (isVideo) "VIDEO" else "AUDIO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentColor)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center,
+                                            modifier = Modifier
+                                                .background(Color(0x1F00E5B4), RoundedCornerShape(12.dp))
+                                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Icon(Icons.Default.CheckCircle, null, tint = AccentColor, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("พร้อมประมวลผล", color = AccentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .background(GradientTealBlue, RoundedCornerShape(12.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CloudUpload,
+                                                contentDescription = "Upload Icon",
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = "เลือกไฟล์วิดีโอ/เสียง หรือ นำเข้าไฟล์ซับไตเติ้ล",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "รองรับวิดีโอใหญ่ ทรานสคริปต์ได้ทันที",
+                                            fontSize = 11.sp,
+                                            color = TextSecondary,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { filePickerLauncher.launch("*/*") },
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1.1f),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = AccentColor,
+                                                contentColor = Color.Black
+                                            ),
+                                            contentPadding = PaddingValues(vertical = 10.dp)
+                                        ) {
+                                            Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("เลือกไฟล์หลัก", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { srtPickerLauncher.launch("*/*") },
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.weight(1.0f),
+                                            border = BorderStroke(1.dp, AmoledBorderColor),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                contentColor = BlueGradientEnd
+                                            ),
+                                            contentPadding = PaddingValues(vertical = 10.dp)
+                                        ) {
+                                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("นำเข้า SRT/VTT", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Section 2
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .background(AmoledSurface, RoundedCornerShape(18.dp))
+                                .border(1.dp, AmoledBorderColor, RoundedCornerShape(18.dp))
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(bottom = 16.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .background(AmoledSurfaceVariant, RoundedCornerShape(4.dp))
+                                        .border(1.dp, AmoledBorderColor, RoundedCornerShape(4.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = eng,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = if (selectedEngine == eng) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
+                                        text = "02",
+                                        style = TextStyle(brush = gradientBrush),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "กำหนดการแปลและ AI Engine",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary
+                                )
+                            }
+
+                            Text(
+                                text = "ภาษาในไฟล์วิดีโอ (Spoken Language)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                sourceLanguages.forEach { lang ->
+                                    val display = when (lang) {
+                                        "Auto" -> "Auto (อัตโนมัติ)"
+                                        "th" -> "ไทย (Thai)"
+                                        "en" -> "อังกฤษ (English)"
+                                        else -> lang
+                                    }
+                                    val isSelected = sourceLanguage == lang
+                                    val labelScale by animateFloatAsState(if (isSelected) 1.05f else 1f, spring(), label = "chipScale")
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { sourceLanguage = lang },
+                                        label = { Text(display, color = if (isSelected) AccentColor else TextSecondary, modifier = Modifier.scale(labelScale)) },
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
+                                            selected = isSelected,
+                                            borderColor = if (isSelected) AccentColor else AmoledBorderColor,
+                                            selectedBorderColor = AccentColor
+                                        ),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            containerColor = Color.Transparent,
+                                            selectedContainerColor = Color(0x1F00E5B4),
+                                            labelColor = TextSecondary,
+                                            selectedLabelColor = AccentColor
+                                        ),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Text(
+                                text = "ภาษาปลายทางที่ต้องการแปล (Translate destination)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                languages.forEach { lang ->
+                                    val isSelected = targetLanguage == lang
+                                    val labelScale by animateFloatAsState(if (isSelected) 1.05f else 1f, spring(), label = "chipScaleTarget")
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { targetLanguage = lang },
+                                        label = { Text(if (lang == "None") "ไม่มีการแปล (ต้นฉบับ)" else lang, color = if (isSelected) AccentColor else TextSecondary, modifier = Modifier.scale(labelScale)) },
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
+                                            selected = isSelected,
+                                            borderColor = if (isSelected) AccentColor else AmoledBorderColor,
+                                            selectedBorderColor = AccentColor
+                                        ),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            containerColor = Color.Transparent,
+                                            selectedContainerColor = Color(0x1F00E5B4),
+                                            labelColor = TextSecondary,
+                                            selectedLabelColor = AccentColor
+                                        ),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "ผู้ช่วยการแปลภาษา (Translation AI Engine)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                engines.forEach { eng ->
+                                    val stats = viewModel.getProviderStats(eng)
+                                    val isSelected = selectedEngine == eng
+                                    
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { selectedEngine = eng }
+                                            .then(
+                                                if (isSelected) {
+                                                    Modifier
+                                                        .drawBehind {
+                                                            drawRoundRect(
+                                                                brush = gradientBrush,
+                                                                style = Stroke(width = 2.dp.toPx()),
+                                                                cornerRadius = CornerRadius(12.dp.toPx())
+                                                            )
+                                                        }
+                                                        .background(Color(0x1A00E5B4), RoundedCornerShape(12.dp))
+                                                } else {
+                                                    Modifier
+                                                        .border(1.dp, AmoledBorderColor, RoundedCornerShape(12.dp))
+                                                        .background(AmoledSurfaceVariant, RoundedCornerShape(12.dp))
+                                                }
+                                            )
+                                            .padding(vertical = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                text = eng,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = if (isSelected) AccentColor else TextPrimary
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(6.dp)
+                                                        .background(if (stats.errorCount > 0 && stats.successCount == 0) Color.Red else AccentColor, CircleShape)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (stats.errorCount > 0 && stats.successCount == 0) "Error" else "Active",
+                                                    fontSize = 9.sp,
+                                                    color = if (isSelected) AccentColor else TextSecondary
+                                                )
+                                            }
                                         }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Text(
+                                text = "น้ำเสียงของคำบรรยาย (Tone Accent)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                tones.forEach { tone ->
+                                    val isSelected = selectedTone == tone
+                                    val labelScale by animateFloatAsState(if (isSelected) 1.05f else 1f, spring(), label = "toneChipScale")
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { selectedTone = tone },
+                                        label = { Text(tone, color = if (isSelected) AccentColor else TextSecondary, modifier = Modifier.scale(labelScale)) },
+                                        border = FilterChipDefaults.filterChipBorder(
+                                            enabled = true,
+                                            selected = isSelected,
+                                            borderColor = if (isSelected) AccentColor else AmoledBorderColor,
+                                            selectedBorderColor = AccentColor
+                                        ),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            containerColor = Color.Transparent,
+                                            selectedContainerColor = Color(0x1F00E5B4),
+                                            labelColor = TextSecondary,
+                                            selectedLabelColor = AccentColor
+                                        ),
+                                        shape = RoundedCornerShape(12.dp)
                                     )
                                 }
                             }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        // Burn Options
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .background(AmoledSurface, RoundedCornerShape(18.dp))
+                                .border(1.dp, AmoledBorderColor, RoundedCornerShape(18.dp))
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = burnSubtitles,
+                                    onCheckedChange = { if (isVideo) burnSubtitles = it else Toast.makeText(context, "ต้องใช้กับไฟล์วิดีโอเท่านั้น", Toast.LENGTH_SHORT).show() },
+                                    colors = CheckboxDefaults.colors(checkedColor = AccentColor, checkmarkColor = Color.Black)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        "เบิร์นซับไตเติ้ลฝังลงในวิดีโอ (Burn captions)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        "ส่งออกวิดีโอ MP4 พร้อมฝังภาพในตัว",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
 
-                    // Real-time AI Performance Analytics Panel
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                            if (burnSubtitles) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(start = 32.dp)
+                                ) {
+                                    burnStyles.forEach { style ->
+                                        val isSelected = burnStyle == style
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = { burnStyle = style },
+                                            label = { Text(style, color = if (isSelected) AccentColor else TextSecondary) },
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = isSelected,
+                                                borderColor = if (isSelected) AccentColor else AmoledBorderColor,
+                                                selectedBorderColor = AccentColor
+                                            ),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                containerColor = Color.Transparent,
+                                                selectedContainerColor = Color(0x1F00E5B4)
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Run Premium Button with high contrast theme-aligned gradient
+                        val runPressedSource = remember { MutableInteractionSource() }
+                        val runIsPressed by runPressedSource.collectIsPressedAsState()
+                        val runScale by animateFloatAsState(if (runIsPressed) 0.96f else 1.0f, label = "runButtonScale")
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 16.dp)
+                                .height(52.dp)
+                                .scale(runScale)
+                                .background(gradientBrush, RoundedCornerShape(14.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Button(
+                                onClick = {
+                                    selectedFileUri?.let { uri ->
+                                        viewModel.generateSubtitles(
+                                            mediaUri = uri,
+                                            fileName = fileName,
+                                            targetLanguage = targetLanguage,
+                                            tone = selectedTone,
+                                            preferredEngine = selectedEngine,
+                                            burnSubtitles = burnSubtitles,
+                                            sourceLanguage = sourceLanguage
+                                        )
+                                    } ?: run {
+                                        Toast.makeText(context, "กรุณาเลือกไฟล์ก่อนเริ่มจัดทำ!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.Transparent,
+                                    contentColor = Color.Black
+                                ),
+                                interactionSource = runPressedSource,
+                                enabled = selectedFileUri != null
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (targetLanguage != "None") "ถอดเสียงและแปลซับ ($targetLanguage)" else "ถอดเสียงต้นฉบับด่วน",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            }
+                        }
+
+                        // Recent History
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -510,582 +843,441 @@ fun AutoSubtitleScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Default.Analytics,
+                                        imageVector = Icons.Default.AccessTime,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = AccentColor,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "สถานะการทำงาน AI & Dynamic Priority",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        text = "ประวัติงานแปลล่าสุด",
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = TextPrimary
                                     )
                                 }
-                                Text(
-                                    text = "เรียลไทม์",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            engines.forEach { eng ->
-                                val stats = viewModel.getProviderStats(eng)
-                                val total = stats.successCount + stats.errorCount
-                                val successRatePct = if (total > 0) {
-                                    "${(stats.successCount * 100) / total}%"
-                                } else {
-                                    "100% (นิ่ง)"
-                                }
-                                val latencyText = if (stats.averageLatencyMs > 0) {
-                                    String.format("%.2f วินาที", stats.averageLatencyMs.toDouble() / 1000.0)
-                                } else {
-                                    "พร้อมใช้งาน"
-                                }
 
-                                Row(
+                                if (history.isNotEmpty()) {
+                                    TextButton(onClick = { viewModel.clearAllHistory() }) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Red)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("ล้างทั้งหมด", fontSize = 11.sp, color = Color.Red)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            if (history.isEmpty()) {
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .background(AmoledSurface, RoundedCornerShape(16.dp))
+                                        .border(1.dp, AmoledBorderColor, RoundedCornerShape(16.dp))
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .background(
-                                                    if (stats.errorCount > 0 && stats.successCount == 0) Color.Red else Color.Green,
-                                                    shape = CircleShape
-                                                )
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = eng,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "คำตอบ: $latencyText",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                        )
-                                        Surface(
-                                            color = if (stats.errorCount > 0 && stats.successCount == 0) {
-                                                MaterialTheme.colorScheme.errorContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                            },
-                                            shape = RoundedCornerShape(4.dp)
+                                    Text("ไม่มีประวัติการแกะซับล่าสุด", color = TextSecondary, fontSize = 12.sp)
+                                }
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    history.forEach { item ->
+                                        ElevatedCard(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = CardDefaults.elevatedCardColors(containerColor = AmoledSurface)
                                         ) {
-                                            Text(
-                                                text = "อัตราสำเร็จ: $successRatePct",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (stats.errorCount > 0 && stats.successCount == 0) {
-                                                    MaterialTheme.colorScheme.onErrorContainer
-                                                } else {
-                                                    MaterialTheme.colorScheme.primary
-                                                },
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                            )
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = item.fileName,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp,
+                                                            color = TextPrimary,
+                                                            maxLines = 1
+                                                        )
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .background(AmoledSurfaceVariant, RoundedCornerShape(4.dp))
+                                                                    .border(1.dp, AmoledBorderColor, RoundedCornerShape(4.dp))
+                                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                            ) {
+                                                                Text("Engine: ${item.engineUsed}", fontSize = 9.sp, color = TextSecondary)
+                                                            }
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .background(AmoledSurfaceVariant, RoundedCornerShape(4.dp))
+                                                                    .border(1.dp, AmoledBorderColor, RoundedCornerShape(4.dp))
+                                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                            ) {
+                                                                Text("แปลเป็น: ${if (item.targetLanguage == "None") "ต้นฉบับ" else item.targetLanguage}", fontSize = 9.sp, color = AccentColor)
+                                                            }
+                                                        }
+                                                    }
+
+                                                    IconButton(
+                                                        onClick = { viewModel.deleteHistoryItem(item) },
+                                                        modifier = Modifier.size(32.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Delete, "Delete", tint = Color.Red.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(10.dp))
+
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "🕒 ${formatHistoryTimestamp(item.timestamp)}",
+                                                        fontSize = 10.sp,
+                                                        color = TextSecondary
+                                                    )
+
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        TextButton(
+                                                            onClick = {
+                                                                viewModel.loadHistoryItem(item)
+                                                                Toast.makeText(context, "โหลดข้อมูลเข้า Editor แล้ว", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(12.dp), tint = AccentColor)
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text("เปิดแก้ไข", fontSize = 11.sp, color = AccentColor)
+                                                        }
+
+                                                        val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                        OutlinedButton(
+                                                            onClick = {
+                                                                val clip = android.content.ClipData.newPlainText("SRT Captions", item.srtContent)
+                                                                clipboardManager.setPrimaryClip(clip)
+                                                                Toast.makeText(context, "คัดลอกไฟล์ซับสำเร็จ!", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            border = BorderStroke(1.dp, AmoledBorderColor),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(10.dp), tint = TextSecondary)
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text("คัดลอก SRT", fontSize = 10.sp, color = TextSecondary)
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Tone Control Presets
-                    Text(
-                        text = "Tone Control (อารมณ์/สไตล์ของซับ)",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        tones.forEach { tone ->
-                            FilterChip(
-                                selected = selectedTone == tone,
-                                onClick = { selectedTone = tone },
-                                label = { Text(tone) },
-                                shape = RoundedCornerShape(12.dp),
-                                leadingIcon = {
-                                    if (selectedTone == tone) {
-                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(32.dp))
                     }
                 }
-            }
-        }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Step 3 Layout
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            StepHeader(number = "03", title = "เลือกรูปแบบและซับฝังลงวิดีโอ (Burn-in)")
-            
-            ElevatedCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        RoundedCornerShape(20.dp)
-                    ),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = burnSubtitles,
-                            onCheckedChange = { if (isVideo) burnSubtitles = it else Toast.makeText(context, "ต้องใช้กับไฟล์วิดีโอเท่านั้น", Toast.LENGTH_SHORT).show() }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                "เบิร์นซับไตเติ้ลฝังลงในวิดีโอ (Burn captions)",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "ส่งออกวิดีโอ MP4 พร้อมตัวหนังสือฝังในภาพ",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                        }
-                    }
-
-                    if (burnSubtitles) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Burn-in Style Pack (แพ็กเกจสไตล์ซับ)",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            burnStyles.forEach { style ->
-                                FilterChip(
-                                    selected = burnStyle == style,
-                                    onClick = { burnStyle = style },
-                                    label = { Text(style) },
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-                    
-                    // Main Action button
-                    Button(
-                        onClick = {
-                            selectedFileUri?.let { uri ->
-                                viewModel.generateSubtitles(
-                                    mediaUri = uri,
-                                    fileName = fileName,
-                                    targetLanguage = targetLanguage,
-                                    tone = selectedTone,
-                                    preferredEngine = selectedEngine,
-                                    burnSubtitles = burnSubtitles,
-                                    sourceLanguage = sourceLanguage
-                                )
-                            } ?: run {
-                                Toast.makeText(context, "กรุณาเลือกไฟล์ก่อนนะ (ขั้นตอนที่ 1)!", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        ),
-                        enabled = selectedFileUri != null && uiState !is SubtitleState.Loading
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.Black)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (targetLanguage != "None") "ถอดเสียงและแปลซับ ($targetLanguage)" else "ถอดเสียงแบบต้นฉบับ",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Black
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Black)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Stable state type check to prevent destructive container recycling during text editing
-        val stateType = remember(uiState) {
-            when (uiState) {
-                is SubtitleState.Idle -> "idle"
-                is SubtitleState.Loading -> "loading"
-                is SubtitleState.Error -> "error"
-                is SubtitleState.Success -> "success"
-            }
-        }
-
-        // Dynamic State UI Handling Optimized for Performance and Thread Safety
-        AnimatedContent(
-            targetState = stateType,
-            transitionSpec = {
-                fadeIn() togetherWith fadeOut()
-            }
-        ) { targetType ->
-            val currentState = uiState
-            when (targetType) {
-                "idle" -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "กดยืนยันด้านบนเพื่อเริ่มขบวนการจัดทำซับไตเติ้ล",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                    }
-                }
                 "loading" -> {
-                    val loadingState = currentState as? SubtitleState.Loading
+                    val loadingState = uiState as? SubtitleState.Loading
                     val messageText = loadingState?.message ?: "กำลังดำเนินการ..."
-                    ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.6f))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .padding(24.dp)
-                                .fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            CircularProgressIndicator()
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = messageText,
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "⚠️ ห้ามปิดหน้าจอ ระบบกำลังบีบอัดไฟล์เสียงและประมวลผลผ่าน AI...",
-                                style = MaterialTheme.typography.labelSmall,
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                }
-                "error" -> {
-                    val errorState = currentState as? SubtitleState.Error
-                    val errorMsg = errorState?.error ?: "เกิดข้อผิดพลาด"
-                    ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.error,
-                                RoundedCornerShape(20.dp)
-                             ),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.elevatedCardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(20.dp)
-                                .fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Error,
-                                contentDescription = "Error Logo",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text(
-                                    text = "เกิดข้อผิดพลาดในการรันงาน:",
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = errorMsg,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                    }
-                }
-                "success" -> {
-                    val successState = currentState as? SubtitleState.Success
-                    if (successState != null) {
-                        KaraokePreviewAndEditor(
-                            srtText = successState.subtitleText,
-                            segments = successState.segments,
-                            burnStyle = burnStyle,
-                            isPlaying = isPlaying,
-                            playTime = playTime,
-                            videoUri = selectedFileUri,
-                            onPlayClick = {
-                                val maxTime = successState.segments.lastOrNull()?.end ?: 10.0
-                                if (isPlaying) {
-                                    viewModel.stopPlaybackSimulation()
-                                } else {
-                                    viewModel.startPlaybackSimulation(maxTime, isVideoAttached = (selectedFileUri != null))
-                                }
-                            },
-                            onStopClick = {
-                                viewModel.stopPlaybackSimulation()
-                            },
-                            onSeek = { seconds ->
-                                viewModel.seekToPosition(seconds)
-                            },
-                            onEditSegment = { index, value ->
-                                viewModel.updateSegmentText(index, value)
-                            },
-                            onRechunk = { maxWords ->
-                                viewModel.rechunkSegments(maxWords)
-                            }
-                        )
-                    }
-                }
-            }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.AccessTime,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "ประวัติคำแปลล่าสุด",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-
-                if (history.isNotEmpty()) {
-                    TextButton(
-                        onClick = { viewModel.clearAllHistory() }
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("ล้างทั้งหมด", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                    val currentStep = when {
+                        messageText.contains("extracting") || messageText.contains("compressing") -> 1
+                        messageText.contains("Transcribing") || messageText.contains("นำเข้า") -> 2
+                        messageText.contains("Translating") || messageText.contains("Formatting") -> 3
+                        messageText.contains("🎬") || messageText.contains("สำเร็จ") -> 4
+                        else -> 1
                     }
-                }
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                    var stepVisible by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        stepVisible = true
+                    }
 
-            if (history.isEmpty()) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                    )
-                ) {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .fillMaxSize()
                             .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.ClosedCaption,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(120.dp)) {
+                            Canvas(modifier = Modifier.size(100.dp).rotate(rotationAnim)) {
+                                drawArc(
+                                    brush = Brush.sweepGradient(listOf(Color(0xFF00E5B4), Color(0xFF00A3FF), Color(0xFF00E5B4))),
+                                    startAngle = 0f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    style = Stroke(width = 3.dp.toPx())
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        Brush.linearGradient(listOf(Color(0xFF00E5B4), Color(0xFF00A3FF))),
+                                        alpha = 0.15f
+                                    )
+                                    .border(1.dp, AmoledBorderColor, RoundedCornerShape(20.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OfflineBolt,
+                                    contentDescription = null,
+                                    tint = AccentColor,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
                         Text(
-                            text = "ยังไม่มีประวัติในแอปนี้",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            text = "กำลังประมวลผลผ่าน AI...",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "ประวัติงานแปลของคุณจะแสดงขึ้นอัตโนมัติเมื่อจัดทำเสร็จ",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            text = "กรุณาเปิดหน้านี้ไว้ ระบบกำลังสร้างความแม่นยำสูง",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
                             textAlign = TextAlign.Center
                         )
-                    }
-                }
-            } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    history.forEach { item ->
-                        ElevatedCard(
+
+                        Spacer(modifier = Modifier.height(32.dp))
+
+                        val steps = listOf(
+                            Pair(1, "แยกช่องสัญญาณเสียง (High Precision)"),
+                            Pair(2, "ถอดเสียงพูดและจับจังหวะผ่าน AI (Groq Whisper)"),
+                            Pair(3, "แปลและย่อประโยคให้ลงตัวด้วย AI"),
+                            Pair(4, "ประกอบสื่อและเตรียมรับชมไฟล์ผลงาน")
+                        )
+
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.elevatedCardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                            )
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.fileName,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            SuggestionChip(
-                                                onClick = {},
-                                                label = { Text("Engine: ${item.engineUsed}") }
-                                            )
-                                            SuggestionChip(
-                                                onClick = {},
-                                                label = { Text("แปลเป็น: ${if (item.targetLanguage == "None") "ต้นฉบับ" else item.targetLanguage}") }
-                                            )
-                                        }
-                                    }
-                                    
-                                    IconButton(
-                                        onClick = { viewModel.deleteHistoryItem(item) },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete record",
-                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                            steps.forEach { (idx, label) ->
+                                val stepState = when {
+                                    idx < currentStep -> "done"
+                                    idx == currentStep -> "active"
+                                    else -> "idle"
                                 }
 
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                AnimatedVisibility(
+                                    visible = stepVisible,
+                                    enter = fadeIn() + slideInVertically(initialOffsetY = { 50 + idx * 20 })
                                 ) {
-                                    Text(
-                                        text = "🕒 ${formatHistoryTimestamp(item.timestamp)}",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                    )
-
                                     Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(AmoledSurface, RoundedCornerShape(10.dp))
+                                            .border(1.dp, if (stepState == "active") AccentColor else AmoledBorderColor, RoundedCornerShape(10.dp))
+                                            .padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Load segment to editor
-                                        TextButton(
-                                            onClick = {
-                                                viewModel.loadHistoryItem(item)
-                                                Toast.makeText(context, "โหลดงานแปลนี้ไปยัง Editor สำเร็จ!", Toast.LENGTH_SHORT).show()
-                                            },
-                                            shape = RoundedCornerShape(8.dp),
-                                            colors = ButtonDefaults.textButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.primary
-                                            )
-                                        ) {
-                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("เปิดดู/แก้ไข", fontSize = 12.sp)
+                                        when (stepState) {
+                                            "done" -> {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .background(AccentColor, CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(Icons.Default.Check, null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                                                }
+                                            }
+                                            "active" -> {
+                                                val activePulse by infiniteTransition.animateFloat(
+                                                    initialValue = 1.0f,
+                                                    targetValue = 1.2f,
+                                                    animationSpec = infiniteRepeatable(
+                                                        animation = tween(800, easing = FastOutSlowInEasing),
+                                                        repeatMode = RepeatMode.Reverse
+                                                    ),
+                                                    label = "pulseStep"
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .scale(activePulse)
+                                                        .background(AmoledBackground, CircleShape)
+                                                        .border(2.dp, BlueGradientEnd, CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Box(modifier = Modifier.size(8.dp).background(BlueGradientEnd, CircleShape))
+                                                }
+                                            }
+                                            else -> {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .background(AmoledBackground, CircleShape)
+                                                        .border(1.dp, AmoledBorderColor, CircleShape)
+                                                )
+                                            }
                                         }
 
-                                        // Copy SRT to clipboard
-                                        val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        OutlinedButton(
-                                            onClick = {
-                                                val clip = android.content.ClipData.newPlainText("SRT Captions", item.srtContent)
-                                                clipboardManager.setPrimaryClip(clip)
-                                                Toast.makeText(context, "คัดลอกไฟล์ซับ SRT สำเร็จ!", Toast.LENGTH_SHORT).show()
-                                            },
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha=0.3f)),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                        ) {
-                                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurface)
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("คัดลอก SRT", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
-                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Text(
+                                            text = label,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (stepState == "active") FontWeight.Bold else FontWeight.Normal,
+                                            color = when (stepState) {
+                                                "done" -> AccentColor
+                                                "active" -> BlueGradientEnd
+                                                else -> TextSecondary
+                                            }
+                                        )
                                     }
                                 }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(32.dp))
+
+                        val progressPercent = when (currentStep) {
+                            1 -> 0.15f
+                            2 -> 0.45f
+                            3 -> 0.75f
+                            4 -> 1.0f
+                            else -> 0.1f
+                        }
+                        val animProgress by animateFloatAsState(progressPercent, spring(), label = "progressAnimation")
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .background(AmoledBorderColor, RoundedCornerShape(3.dp))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(animProgress)
+                                        .height(6.dp)
+                                        .background(gradientBrush, RoundedCornerShape(3.dp))
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "ขั้นตอนที่ $currentStep/4 — ${steps[currentStep-1].second}",
+                                    fontSize = 10.sp,
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = "${(animProgress * 100).toInt()}%",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentColor
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(40.dp))
+
+                        OutlinedButton(
+                            onClick = { viewModel.cancelJob() },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                        ) {
+                            Text("ยกเลิกทำงานและย้อนกลับ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                "result" -> {
+                    val successState = uiState as? SubtitleState.Success
+                    if (successState != null) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AmoledSurface)
+                                    .border(BorderStroke(1.dp, AmoledBorderColor))
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { viewModel.cancelJob() }) {
+                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "ผลลัพธ์ & แก้ไขคำแปล",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0x1F00E5B4), RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .border(1.dp, AccentColor, RoundedCornerShape(12.dp))
+                                ) {
+                                    Text(
+                                        text = "✓ สำเร็จ",
+                                        color = AccentColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Box(modifier = Modifier.weight(1f)) {
+                                KaraokePreviewAndEditor(
+                                    srtText = successState.subtitleText,
+                                    segments = successState.segments,
+                                    burnStyle = burnStyle,
+                                    isPlaying = isPlaying,
+                                    playTime = playTime,
+                                    videoUri = selectedFileUri,
+                                    onPlayClick = {
+                                        val maxTime = successState.segments.lastOrNull()?.end ?: 10.0
+                                        if (isPlaying) {
+                                            viewModel.stopPlaybackSimulation()
+                                        } else {
+                                            viewModel.startPlaybackSimulation(maxTime, isVideoAttached = (selectedFileUri != null))
+                                        }
+                                    },
+                                    onStopClick = {
+                                        viewModel.stopPlaybackSimulation()
+                                    },
+                                    onSeek = { seconds ->
+                                        viewModel.seekToPosition(seconds)
+                                    },
+                                    onEditSegment = { index, value ->
+                                        viewModel.updateSegmentText(index, value)
+                                    },
+                                    onRechunk = { maxWords ->
+                                        viewModel.rechunkSegments(maxWords)
+                                    }
+                                )
                             }
                         }
                     }
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(32.dp))
     }
 }
 
@@ -2395,11 +2587,15 @@ fun SegmentEditorCard(
         }
     }
 
-    LaunchedEffect(localText) {
-        if (localText != segment.text) {
-            kotlinx.coroutines.delay(400L)
-            onEditSegment(idx, localText)
-        }
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    LaunchedEffect(idx) {
+        snapshotFlow { localText }
+            .debounce(400L)
+            .collect { text ->
+                if (text != segment.text) {
+                    onEditSegment(idx, text)
+                }
+            }
     }
 
     ElevatedCard(
