@@ -33,8 +33,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import android.widget.VideoView
-import android.widget.MediaController
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -484,6 +487,115 @@ fun AutoSubtitleScreen(
                                             MaterialTheme.colorScheme.onSurface
                                         }
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Real-time AI Performance Analytics Panel
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Analytics,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "สถานะการทำงาน AI & Dynamic Priority",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    text = "เรียลไทม์",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            engines.forEach { eng ->
+                                val stats = viewModel.getProviderStats(eng)
+                                val total = stats.successCount + stats.errorCount
+                                val successRatePct = if (total > 0) {
+                                    "${(stats.successCount * 100) / total}%"
+                                } else {
+                                    "100% (นิ่ง)"
+                                }
+                                val latencyText = if (stats.averageLatencyMs > 0) {
+                                    String.format("%.2f วินาที", stats.averageLatencyMs.toDouble() / 1000.0)
+                                } else {
+                                    "พร้อมใช้งาน"
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .background(
+                                                    if (stats.errorCount > 0 && stats.successCount == 0) Color.Red else Color.Green,
+                                                    shape = CircleShape
+                                                )
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = eng,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "คำตอบ: $latencyText",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        )
+                                        Surface(
+                                            color = if (stats.errorCount > 0 && stats.successCount == 0) {
+                                                MaterialTheme.colorScheme.errorContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                            },
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "อัตราสำเร็จ: $successRatePct",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (stats.errorCount > 0 && stats.successCount == 0) {
+                                                    MaterialTheme.colorScheme.onErrorContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary
+                                                },
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1043,79 +1155,92 @@ fun VideoPlayerWithSubtitles(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var isPrepared by remember { mutableStateOf(false) }
-    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
 
-    // Clean up VideoView when disposed or when URI changes to prevent any leaks or background playing
-    DisposableEffect(videoUri) {
-        onDispose {
-            try {
-                videoViewRef?.stopPlayback()
-                videoViewRef = null
-                isPrepared = false
-            } catch (e: Exception) {
-                android.util.Log.e("VideoPlayer", "Error cleaning up VideoView: ${e.message}")
-            }
+    // Initialize ExoPlayer and keep it across recompositions
+    val exoPlayer = remember(context) {
+        ExoPlayer.Builder(context).build().apply {
+            repeatMode = Player.REPEAT_MODE_OFF
         }
     }
 
-    // Direct polling: When media is playing and prepared, poll actual current position from MediaPlayer
-    // and broadcast it to the ViewModel. This acts as the master playback clock.
-    LaunchedEffect(isPlaying, isPrepared) {
-        if (isPlaying && isPrepared) {
-            try {
-                while (isPlaying && isPrepared) {
-                    videoViewRef?.let {
-                        if (it.isPlaying) {
-                            val currentPosSeconds = it.currentPosition.toDouble() / 1000.0
-                            onPositionChanged(currentPosSeconds)
-                        }
-                    }
-                    kotlinx.coroutines.delay(100L) // Poll every 100ms for accurate and responsive subtitle tracking
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("VideoPlayer", "Polling exception: ${e.message}")
-            }
+    // Prepare and set media items upon URI updates cleanly
+    LaunchedEffect(videoUri) {
+        try {
+            val mediaItem = MediaItem.fromUri(videoUri)
+            exoPlayer.setMediaItem(mediaItem)
+            exoPlayer.prepare()
+            exoPlayer.seekTo((playTime * 1000).toLong())
+        } catch (e: Exception) {
+            android.util.Log.e("VideoPlayer", "Error preparing ExoPlayer Uri: ${e.message}")
         }
     }
 
-    // Synchronize play/pause commands to VideoView safely
+    // Synchronize play/pause commands to ExoPlayer safely
     LaunchedEffect(isPlaying) {
         try {
-            videoViewRef?.let {
-                if (isPlaying) {
-                    if (isPrepared && !it.isPlaying) {
-                        it.start()
-                    }
-                } else {
-                    if (it.isPlaying) {
-                        it.pause()
-                    }
-                }
+            if (isPlaying) {
+                exoPlayer.play()
+            } else {
+                exoPlayer.pause()
             }
         } catch (e: Exception) {
-            android.util.Log.e("VideoPlayer", "Error handling isPlaying: ${e.message}")
+            android.util.Log.e("VideoPlayer", "Error controlling ExoPlayer isPlaying: ${e.message}")
         }
     }
 
-    // Capture manual timeline ticks/scrub seeks to seek VideoView safely.
-    // Extremely optimized to only run when manualSeekTime changes to avoid freezing the main thread on every tick.
+    // Capture manual timeline ticks/scrub seeks to seek ExoPlayer safely
     LaunchedEffect(manualSeekTime) {
         manualSeekTime?.let { time ->
             try {
-                videoViewRef?.let {
-                    if (isPrepared) {
-                        it.seekTo((time * 1000).toInt())
-                    }
-                }
-                onSeekHandled()
+                exoPlayer.seekTo((time * 1000).toLong())
             } catch (e: Exception) {
                 android.util.Log.e("VideoPlayer", "Error handling manual seek: ${e.message}")
+            }
+            onSeekHandled()
+        }
+    }
+
+    // Register Player.Listener and automate release lifecycle behavior to avoid leaks
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    onPlayStateChanged(false)
+                    onPositionChanged(0.0)
+                    try {
+                        exoPlayer.seekTo(0)
+                    } catch (e: Exception) {
+                        // Suppress
+                    }
+                }
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            try {
+                exoPlayer.removeListener(listener)
+                exoPlayer.release()
+            } catch (e: Exception) {
+                // Suppress
             }
         }
     }
 
-    // High performance UI container re-keyed by videoUri & videoAspectRatio to scale container cleanly
+    // Direct super-high fidelity polling loop to feed master playback time back to ViewModel Flow
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            try {
+                while (true) {
+                    val currentPosSeconds = exoPlayer.currentPosition.toDouble() / 1000.0
+                    onPositionChanged(currentPosSeconds)
+                    kotlinx.coroutines.delay(50L) // Outstanding 50ms polling rate!
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("VideoPlayer", "ExoPlayer progress polling error: ${e.message}")
+            }
+        }
+    }
+
     val isLandscape = videoAspectRatio == "16:9"
     val videoBoxModifier = if (isLandscape) {
         modifier
@@ -1127,80 +1252,42 @@ fun VideoPlayerWithSubtitles(
             .aspectRatio(9f / 16f)
     }
 
-    androidx.compose.runtime.key(videoUri, videoAspectRatio) {
-        Box(
-            modifier = videoBoxModifier
-                .background(Color.Black, shape = RoundedCornerShape(16.dp))
-                .clip(RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
-                        layoutParams = android.view.ViewGroup.LayoutParams(
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        try {
-                            setVideoURI(videoUri)
-                        } catch (e: Exception) {
-                            android.util.Log.e("VideoPlayer", "Error setting video URI: ${e.message}")
-                        }
-                        setOnErrorListener { _, what, extra ->
-                            android.util.Log.e("VideoPlayer", "MediaPlayer Error: what=$what extra=$extra")
-                            true // Handle failure gracefully to avoid system crash dialog / app death
-                        }
-                        setOnPreparedListener { mp ->
-                            isPrepared = true
-                            mp.isLooping = false
-                            try {
-                                seekTo((playTime * 1000).toInt())
-                                if (isPlaying) {
-                                    start()
-                                }
-                            } catch (e: Exception) {
-                                android.util.Log.e("VideoPlayer", "Error onPrepared seek/start: ${e.message}")
-                            }
-                        }
-                        setOnCompletionListener {
-                            onPlayStateChanged(false)
-                            onPositionChanged(0.0)
-                        }
-                        videoViewRef = this
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-                update = { view ->
-                    try {
-                        // Keep video view state in sync safely
-                        if (isPlaying && isPrepared && !view.isPlaying) {
-                            view.start()
-                        } else if (!isPlaying && view.isPlaying) {
-                            view.pause()
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("VideoPlayer", "Error updating VideoView: ${e.message}")
-                    }
+    Box(
+        modifier = videoBoxModifier
+            .background(Color.Black, shape = RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false // Hide default controllers
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    player = exoPlayer
                 }
-            )
+            },
+            modifier = Modifier.fillMaxSize(),
+            update = { view ->
+                view.player = exoPlayer
+            }
+        )
 
-            // Render Custom Subtitles layer dynamically over the video with custom font properties
-            if (!activeSegmentText.isNullOrEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 24.dp, start = 16.dp, end = 16.dp),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    SubtitleOverlayText(
-                        text = activeSegmentText,
-                        burnStyle = burnStyle,
-                        fontName = fontName,
-                        colorName = colorName,
-                        fontSizeSp = fontSizeSp,
-                        bgOpacity = bgOpacity
-                    )
-                }
+        // Render Custom Subtitles layer dynamically over the video with custom font properties
+        if (!activeSegmentText.isNullOrEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 24.dp, start = 16.dp, end = 16.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                SubtitleOverlayText(
+                    text = activeSegmentText,
+                    burnStyle = burnStyle,
+                    fontName = fontName,
+                    colorName = colorName,
+                    fontSizeSp = fontSizeSp,
+                    bgOpacity = bgOpacity
+                )
             }
         }
     }

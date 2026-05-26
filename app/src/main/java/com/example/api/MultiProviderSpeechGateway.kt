@@ -83,11 +83,68 @@ object MultiProviderSpeechGateway {
     // Simple thread-safe LRU cache for translations to avoid duplicate API calls & excessive memory usage
     private val translationCache = android.util.LruCache<String, String>(1000)
 
+    // AI performance metrics to prioritize the fastest and most reliable provider dynamically
+    data class ProviderStats(
+        var successCount: Int = 0,
+        var errorCount: Int = 0,
+        var averageLatencyMs: Long = 0
+    )
+
+    private val providerStats = java.util.concurrent.ConcurrentHashMap<String, ProviderStats>().apply {
+        put("DEEPSEEK", ProviderStats())
+        put("MISTRAL", ProviderStats())
+        put("GEMINI", ProviderStats())
+    }
+
+    fun getStatsFor(provider: String): ProviderStats {
+        return providerStats[provider.uppercase()] ?: ProviderStats()
+    }
+
     private fun isKeyValid(key: String, placeholderDefault: String): Boolean {
         if (key.isEmpty()) return false
         val upper = key.uppercase().trim()
         val upperPlaceholder = placeholderDefault.uppercase().trim()
         return !upper.startsWith("YOUR_") && !upper.startsWith("MY_") && !upper.startsWith("PLACEHOLDER") && upper != upperPlaceholder
+    }
+
+    // Dynamic prioritization based on statistical performance (Real-time Success Rate and Speed)
+    private fun getPrioritizedProviders(preferred: String): List<String> {
+        val defaultOrder = when (preferred.uppercase()) {
+            "DEEPSEEK" -> listOf("DEEPSEEK", "MISTRAL", "GEMINI")
+            "MISTRAL" -> listOf("MISTRAL", "DEEPSEEK", "GEMINI")
+            else -> listOf("GEMINI", "DEEPSEEK", "MISTRAL")
+        }
+
+        fun getProviderScore(provider: String): Double {
+            val stats = providerStats[provider] ?: return 1.0
+            val total = stats.successCount + stats.errorCount
+            if (total == 0) return 999.0 // Unused models get high priority to probe them
+            val successRate = stats.successCount.toDouble() / total.toDouble()
+            val avgLatencySec = (stats.averageLatencyMs.toDouble() / 1000.0).coerceAtLeast(0.1)
+            return successRate / avgLatencySec // Score proportional to success rate and inversely proportional to latency
+        }
+
+        // Sort dynamically. High score goes first.
+        val scoredList = defaultOrder.sortedByDescending { getProviderScore(it) }
+        Log.d(TAG, "Dynamic Prioritized Providers Order: $scoredList (DeepSeek Score=${getProviderScore("DEEPSEEK")}, Mistral Score=${getProviderScore("MISTRAL")}, Gemini Score=${getProviderScore("GEMINI")})")
+        return scoredList
+    }
+
+    private fun recordSuccess(provider: String, latencyMs: Long) {
+        val stats = providerStats[provider] ?: ProviderStats()
+        stats.successCount++
+        val total = stats.successCount + stats.errorCount
+        stats.averageLatencyMs = (stats.averageLatencyMs * (total - 1) + latencyMs) / total
+        providerStats[provider] = stats
+    }
+
+    private fun recordFailure(provider: String) {
+        val stats = providerStats[provider] ?: ProviderStats()
+        stats.errorCount++
+        val total = stats.successCount + stats.errorCount
+        // Assign a penalty of 10s of simulated latency on failures to dynamically avoid slow failing gateways
+        stats.averageLatencyMs = (stats.averageLatencyMs * (total - 1) + 10000L) / total
+        providerStats[provider] = stats
     }
 
     /**
@@ -122,8 +179,19 @@ object MultiProviderSpeechGateway {
         preferredProvider: String
     ): List<String> {
         val jsonInput = listAdapter.toJson(batch)
+
+        // Custom creative and structural translation directions based on selected Tone
+        val toneInstruction = when (tone.uppercase()) {
+            "CASUAL" -> "Use a warm, highly natural, friendly, and conversational style. Write like friends chatting (e.g., using natural particles, informal words, simple language) but keep subtitles concise."
+            "HYPE" -> "Use an energetic, viral, exciting, and hyper-enthusiastic style! Use strong punchy verbs, viral internet slang, exclamation marks, and keep the sentence flow fast-paced and catchy for short-form clips (TikTok/Shorts style)."
+            "FORMAL" -> "Use a highly professional, accurate, elegant, polite, and official style. Avoid colloquialisms or slang. Ensure precise vocabulary suitable for television, documentaries, or news reports."
+            "EDUCATIONAL" -> "Use an informative, clear, easy-to-understand, academic, and polite style. Ensure specialized terms are clearly explained or translated correctly to maximize educational context and reader understanding."
+            else -> "Use a natural conversational subtitle style."
+        }
+
         val prompt = ("You are an expert subtitle translator. Translate the following sequential list of subtitle lines to $targetLanguage.\n" +
-                "The translation tone must be '$tone'.\n\n" +
+                "The translation tone must be '$tone'.\n" +
+                "Tone Guidelines: $toneInstruction\n\n" +
                 "IMPORTANT COMBINED RULES:\n" +
                 "1. Translate each line accurately and naturally based on the surrounding conversation context.\n" +
                 "2. Return the translation as a JSON array of strings: [\"translation1\", \"translation2\", ...]\n" +
@@ -132,15 +200,11 @@ object MultiProviderSpeechGateway {
                 "5. Return ONLY the valid JSON array starting with '[' and ending with ']'. Do not include markdown block markers (like ```json), notes, or descriptions.\n\n" +
                 "Input lines:\n$jsonInput")
 
-        val providersToTry = when (preferredProvider.uppercase()) {
-            "DEEPSEEK" -> listOf("DEEPSEEK", "MISTRAL", "GEMINI")
-            "MISTRAL" -> listOf("MISTRAL", "DEEPSEEK", "GEMINI")
-            else -> listOf("GEMINI", "DEEPSEEK", "MISTRAL")
-        }
-
+        val providersToTry = getPrioritizedProviders(preferredProvider)
         var lastError: Throwable? = null
 
         for (provider in providersToTry) {
+            val startTime = System.currentTimeMillis()
             try {
                 Log.d(TAG, "Attempting batch translation of ${batch.size} items with: $provider")
                 val responseText = when (provider) {
@@ -154,12 +218,17 @@ object MultiProviderSpeechGateway {
                     val cleaned = cleanJsonResponse(responseText)
                     val list = listAdapter.fromJson(cleaned)
                     if (list != null && list.size == batch.size) {
+                        recordSuccess(provider, System.currentTimeMillis() - startTime)
                         return list
                     } else {
-                        Log.e(TAG, "Size mismatch or invalid JSON. Expected: ${batch.size}, Got: ${list?.size ?: 0}")
+                        recordFailure(provider)
+                        Log.e(TAG, "Size mismatch or invalid JSON from $provider. Expected: ${batch.size}, Got: ${list?.size ?: 0}")
                     }
+                } else {
+                    recordFailure(provider)
                 }
             } catch (e: Throwable) {
+                recordFailure(provider)
                 Log.e(TAG, "Batch provider $provider failed: ${e.message}")
                 lastError = e
                 delay(200)
@@ -194,7 +263,7 @@ object MultiProviderSpeechGateway {
 
     /**
      * Translates text with robust failover and self-healing.
-     * Tries vendors in order: DeepSeek -> Mistral -> Gemini.
+     * Tries vendors in order dynamically optimized by real-time success stats.
      */
     suspend fun translateWithFailover(
         text: String,
@@ -211,20 +280,25 @@ object MultiProviderSpeechGateway {
             return@withContext it
         }
 
+        val toneInstruction = when (tone.uppercase()) {
+            "CASUAL" -> "Use a warm, highly natural, friendly, and conversational style. Write like friends chatting (e.g., using natural particles, informal words, simple language) but keep subtitles concise."
+            "HYPE" -> "Use an energetic, viral, exciting, and hyper-enthusiastic style! Use strong punchy verbs, viral internet slang, exclamation marks, and keep the sentence flow fast-paced and catchy for short-form clips (TikTok/Shorts style)."
+            "FORMAL" -> "Use a highly professional, accurate, elegant, polite, and official style. Avoid colloquialisms or slang. Ensure precise vocabulary suitable for television, documentaries, or news reports."
+            "EDUCATIONAL" -> "Use an informative, clear, easy-to-understand, academic, and polite style. Ensure specialized terms are clearly explained or translated correctly to maximize educational context and reader understanding."
+            else -> "Use a natural conversational subtitle style."
+        }
+
         val prompt = "Translate the following audio subtitle text to $targetLanguage. " +
                 "The translation tone must be '$tone'. " +
+                "Tone Guidelines: $toneInstruction " +
                 "Return ONLY the direct translation, preserving the sentiment and timing structure. " +
                 "Do not include explanations, notes, or prefixes.\n\n$trimmed"
 
-        val providersToTry = when (preferredProvider.uppercase()) {
-            "DEEPSEEK" -> listOf("DEEPSEEK", "MISTRAL", "GEMINI")
-            "MISTRAL" -> listOf("MISTRAL", "DEEPSEEK", "GEMINI")
-            else -> listOf("GEMINI", "DEEPSEEK", "MISTRAL")
-        }
-
+        val providersToTry = getPrioritizedProviders(preferredProvider)
         var lastError: Throwable? = null
 
         for (provider in providersToTry) {
+            val startTime = System.currentTimeMillis()
             try {
                 Log.d(TAG, "Attempting translation with: $provider")
                 val resultText = when (provider) {
@@ -235,10 +309,14 @@ object MultiProviderSpeechGateway {
                 }
 
                 if (resultText != null && resultText.isNotEmpty()) {
+                    recordSuccess(provider, System.currentTimeMillis() - startTime)
                     translationCache.put(cacheKey, resultText)
                     return@withContext resultText
+                } else {
+                    recordFailure(provider)
                 }
             } catch (e: Throwable) {
+                recordFailure(provider)
                 Log.e(TAG, "Provider $provider failed: ${e.message}", e)
                 lastError = e
                 // Pause briefly before switching/retrying
