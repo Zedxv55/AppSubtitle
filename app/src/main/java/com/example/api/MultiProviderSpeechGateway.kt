@@ -81,7 +81,13 @@ object MultiProviderSpeechGateway {
     private val listAdapter = moshi.adapter<List<String>>(listType)
 
     // Simple thread-safe LRU cache for translations to avoid duplicate API calls & excessive memory usage
-    private val translationCache = android.util.LruCache<String, String>(1000)
+    private val translationCache = java.util.Collections.synchronizedMap(
+        object : java.util.LinkedHashMap<String, String>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
+                return size > 1000
+            }
+        }
+    )
 
     // AI performance metrics to prioritize the fastest and most reliable provider dynamically
     data class ProviderStats(
@@ -383,6 +389,6 @@ object MultiProviderSpeechGateway {
      * Clears local translation caches.
      */
     fun clearCache() {
-        translationCache.evictAll()
+        translationCache.clear()
     }
 }

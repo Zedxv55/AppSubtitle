@@ -53,7 +53,7 @@ object SubtitleParser {
                 // Ignore WEBVTT header
             } else {
                 if (currentText.isNotEmpty()) {
-                    currentText.append(" ")
+                    currentText.append("\n")
                 }
                 currentText.append(trimmed)
             }

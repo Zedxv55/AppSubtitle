@@ -42,7 +42,7 @@ object SubtitleFormatter {
         val remainingSeconds = totalSeconds % 3600
         val minutes = remainingSeconds / 60
         val secs = remainingSeconds % 60
-        val milliseconds = ((seconds - totalSeconds) * 1000).toInt()
+        val milliseconds = Math.round((seconds - totalSeconds) * 1000).toInt()
 
         return String.format(Locale.US, "%02d:%02d:%02d%c%03d", hours, minutes, secs, msSeparator, milliseconds)
     }

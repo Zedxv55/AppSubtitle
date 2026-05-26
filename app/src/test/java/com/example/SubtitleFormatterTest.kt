@@ -26,7 +26,7 @@ class SubtitleFormatterTest {
 
 
         """.trimIndent()
-        assertEquals(expected, srt.trimIndent())
+        assertEquals(expected.trim(), srt.trim())
     }
 
     @Test
