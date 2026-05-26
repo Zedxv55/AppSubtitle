@@ -22,7 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -314,22 +317,24 @@ fun AutoSubtitleScreen(
                         }
 
                         if (uiState is SubtitleState.Error) {
-                            val errorState = uiState as SubtitleState.Error
-                            val errorMsg = errorState.error
-                            ElevatedCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                                    .border(1.dp, Color.Red, RoundedCornerShape(12.dp)),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.elevatedCardColors(containerColor = Color(0x33FF0000))
-                            ) {
-                                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Error, "error", tint = Color.Red, modifier = Modifier.size(28.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text("เกิดข้อผิดพลาดในการรันงาน:", fontWeight = FontWeight.Bold, color = Color.Red, fontSize = 13.sp)
-                                        Text(errorMsg, color = Color.Red, fontSize = 12.sp)
+                            val errorState = uiState as? SubtitleState.Error
+                            if (errorState != null) {
+                                val errorMsg = errorState.error
+                                ElevatedCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .border(1.dp, Color.Red, RoundedCornerShape(12.dp)),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.elevatedCardColors(containerColor = Color(0x33FF0000))
+                                ) {
+                                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Error, "error", tint = Color.Red, modifier = Modifier.size(28.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text("เกิดข้อผิดพลาดในการรันงาน:", fontWeight = FontWeight.Bold, color = Color.Red, fontSize = 13.sp)
+                                            Text(errorMsg, color = Color.Red, fontSize = 12.sp)
+                                        }
                                     }
                                 }
                             }
@@ -1205,7 +1210,7 @@ fun AutoSubtitleScreen(
                 "result" -> {
                     val successState = uiState as? SubtitleState.Success
                     if (successState != null) {
-                        Column(modifier = Modifier.fillMaxSize()) {
+                       Column(modifier = Modifier.fillMaxSize()) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1217,7 +1222,7 @@ fun AutoSubtitleScreen(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(onClick = { viewModel.cancelJob() }) {
-                                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
                                     }
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
@@ -1929,7 +1934,7 @@ fun KaraokePreviewAndEditor(
                         contentColor = Color.Black
                     )
                 ) {
-                    Icon(Icons.Default.CallSplit, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.AutoMirrored.Filled.CallSplit, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("จัดรูปแบ่งคำบนหน้าจอทันที (Auto-Group Segments)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
@@ -2329,7 +2334,7 @@ fun KaraokePreviewAndEditor(
                         contentPadding = PaddingValues(horizontal = 6.dp, vertical = 10.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha=0.3f))
                     ) {
-                        Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("TXT", fontSize = 11.sp, maxLines = 1)
                     }
@@ -2505,7 +2510,7 @@ fun KaraokePreviewAndEditor(
                         enabled = clampedPage > 0
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Previous Page",
                             tint = if (clampedPage > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha=0.3f)
                         )
@@ -2523,7 +2528,7 @@ fun KaraokePreviewAndEditor(
                         enabled = clampedPage < totalPages - 1
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ArrowForward,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "Next Page",
                             tint = if (clampedPage < totalPages - 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha=0.3f)
                         )
@@ -2579,16 +2584,10 @@ fun SegmentEditorCard(
     isActive: Boolean,
     onEditSegment: (Int, String) -> Unit
 ) {
-    var localText by remember(segment.start, segment.end) { mutableStateOf(segment.text) }
-
-    LaunchedEffect(segment.text) {
-        if (localText != segment.text) {
-            localText = segment.text
-        }
-    }
+    var localText by remember(segment.start, segment.end, segment.text) { mutableStateOf(segment.text) }
 
     @OptIn(kotlinx.coroutines.FlowPreview::class)
-    LaunchedEffect(idx) {
+    LaunchedEffect(segment) {
         snapshotFlow { localText }
             .debounce(400L)
             .collect { text ->
