@@ -26,6 +26,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
 
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalContext
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
@@ -33,7 +38,28 @@ fun EditorScreen(
     onNavigateBack: () -> Unit,
     onNavigateToExport: () -> Unit
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val currentMediaUri by viewModel.currentMediaUri.collectAsState()
+    
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            currentMediaUri?.let { uri ->
+                setMediaItem(MediaItem.fromUri(uri))
+                prepare()
+            }
+        }
+    }
+    
+    DisposableEffect(currentMediaUri) {
+        currentMediaUri?.let { uri ->
+            exoPlayer.setMediaItem(MediaItem.fromUri(uri))
+            exoPlayer.prepare()
+        }
+        onDispose {
+            exoPlayer.release()
+        }
+    }
     
     // Editor Setup Parameters state
     var isSettingsDone by remember { mutableStateOf(false) }
@@ -176,28 +202,45 @@ fun EditorScreen(
                         .fillMaxWidth()
                         .weight(1.5f)
                         .background(Color.Black)
-                        .padding(margin.dp)
                 ) {
-                    val currentText = if (segments.isNotEmpty() && selectedIndex < segments.size) segments[selectedIndex].text else "Video Preview (Live)"
-                    Text(
-                        text = currentText,
-                        style = when(textStyle) {
-                            "TikTok" -> MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold)
-                            "Minimal" -> MaterialTheme.typography.bodyLarge
-                            else -> MaterialTheme.typography.headlineMedium
-                        },
-                        color = Color.White,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
-                                    change.consume()
-                                    offsetX += dragAmount.x
-                                    offsetY += dragAmount.y
+                    currentMediaUri?.let {
+                        AndroidView(
+                            factory = { ctx ->
+                                androidx.media3.ui.PlayerView(ctx).apply {
+                                    player = exoPlayer
+                                    useController = true
                                 }
-                            }
-                    )
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(margin.dp)
+                    ) {
+                        val currentText = if (segments.isNotEmpty() && selectedIndex < segments.size) segments[selectedIndex].text else "Video Preview (Live)"
+                        Text(
+                            text = currentText,
+                            style = when(textStyle) {
+                                "TikTok" -> MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.ExtraBold, shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 8f))
+                                "Minimal" -> MaterialTheme.typography.bodyLarge.copy(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 4f))
+                                else -> MaterialTheme.typography.headlineMedium.copy(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 8f))
+                            },
+                            color = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                                .pointerInput(Unit) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        offsetX += dragAmount.x
+                                        offsetY += dragAmount.y
+                                    }
+                                }
+                        )
+                    }
                 }
 
                 // Subtitle Editor Segments

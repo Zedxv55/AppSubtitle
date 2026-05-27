@@ -122,6 +122,9 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = SubtitleState.Idle
     }
 
+    private val _currentMediaUri = MutableStateFlow<Uri?>(null)
+    val currentMediaUri: StateFlow<Uri?> = _currentMediaUri.asStateFlow()
+
     fun generateSubtitles(
         mediaUri: Uri,
         fileName: String,
@@ -131,6 +134,7 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
         burnSubtitles: Boolean = false,
         sourceLanguage: String = "Auto"
     ) {
+        _currentMediaUri.value = mediaUri
         val applicationContext = getApplication<Application>()
         
         currentJob = viewModelScope.launch {
