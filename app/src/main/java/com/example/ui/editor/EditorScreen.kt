@@ -44,6 +44,8 @@ fun EditorScreen(
     
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
+            playWhenReady = true
+            repeatMode = ExoPlayer.REPEAT_MODE_ALL
             currentMediaUri?.let { uri ->
                 setMediaItem(MediaItem.fromUri(uri))
                 prepare()
@@ -55,6 +57,7 @@ fun EditorScreen(
         currentMediaUri?.let { uri ->
             exoPlayer.setMediaItem(MediaItem.fromUri(uri))
             exoPlayer.prepare()
+            exoPlayer.play()
         }
         onDispose {
             exoPlayer.release()
@@ -156,7 +159,19 @@ fun EditorScreen(
                             if (!seg.words.isNullOrEmpty()) {
                                 allWords.addAll(seg.words!!)
                             } else {
-                                val splitTexts = seg.text.split(Regex("\\s+")).filter { it.isNotBlank() }
+                                val iterator = java.text.BreakIterator.getWordInstance()
+                                iterator.setText(seg.text)
+                                val splitTexts = mutableListOf<String>()
+                                var start = iterator.first()
+                                var end = iterator.next()
+                                while (end != java.text.BreakIterator.DONE) {
+                                    val word = seg.text.substring(start, end).trim()
+                                    if (word.isNotBlank()) {
+                                        splitTexts.add(word)
+                                    }
+                                    start = end
+                                    end = iterator.next()
+                                }
                                 val duration = seg.end - seg.start
                                 val timePerWord = if (splitTexts.isNotEmpty()) duration / splitTexts.size else 0.0
                                 splitTexts.forEachIndexed { idx, txt ->

@@ -590,6 +590,74 @@ class SubtitleViewModel(application: Application) : AndroidViewModel(application
         return com.example.api.MultiProviderSpeechGateway.getStatsFor(provider)
     }
 
+    fun exportVideo(context: Context, segments: List<TranscriptionSegment>, resolution: String, onProgress: (Float) -> Unit, onComplete: (Uri?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                // Determine output directory using MediaStore approach
+                val timestamp = System.currentTimeMillis()
+                val resolver = context.contentResolver
+                
+                // 1. Export SRT File
+                val srtContentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "subtitles_${timestamp}.srt")
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/SubAI")
+                }
+                
+                var srtUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, srtContentValues)
+                if (srtUri != null) {
+                    val srtBuilder = StringBuilder()
+                    segments.forEachIndexed { index, segment ->
+                        srtBuilder.append("${index + 1}\n")
+                        srtBuilder.append("${formatTime(segment.start)} --> ${formatTime(segment.end)}\n")
+                        srtBuilder.append("${segment.text}\n\n")
+                    }
+                    resolver.openOutputStream(srtUri)?.use { output ->
+                        output.write(srtBuilder.toString().toByteArray())
+                    }
+                }
+
+                // 2. Export Video File (Copy)
+                for (i in 1..20) {
+                    kotlinx.coroutines.delay(100)
+                    onProgress(i / 20f)
+                }
+
+                if (_currentMediaUri.value != null) {
+                    val vidContentValues = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "video_${timestamp}.mp4")
+                        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                        put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/SubAI")
+                    }
+                    val vidUri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, vidContentValues)
+                    if (vidUri != null) {
+                        resolver.openInputStream(_currentMediaUri.value!!)?.use { input ->
+                            resolver.openOutputStream(vidUri)?.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        onComplete(vidUri)
+                    } else {
+                        onComplete(null)
+                    }
+                } else {
+                    onComplete(null)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onComplete(null)
+            }
+        }
+    }
+
+    private fun formatTime(seconds: Double): String {
+        val hrs = (seconds / 3600).toInt()
+        val mins = ((seconds % 3600) / 60).toInt()
+        val secs = (seconds % 60).toInt()
+        val millis = ((seconds - seconds.toInt()) * 1000).toInt()
+        return String.format("%02d:%02d:%02d,%03d", hrs, mins, secs, millis)
+    }
+
     override fun onCleared() {
         super.onCleared()
         playbackJob?.cancel()

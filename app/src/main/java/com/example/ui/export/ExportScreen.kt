@@ -30,6 +30,9 @@ fun ExportScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -95,15 +98,30 @@ fun ExportScreen(
                     if (!isExporting) {
                         isExporting = true
                         exportProgress = 0f
-                        scope.launch {
-                            // Mocking the export progress
-                            while (exportProgress < 1.0f) {
-                                kotlinx.coroutines.delay(100)
-                                exportProgress += 0.05f
+                        
+                        // Extract segments from current State
+                        val segments = if (uiState is com.example.viewmodel.SubtitleState.Success) {
+                            (uiState as com.example.viewmodel.SubtitleState.Success).segments
+                        } else emptyList()
+
+                        viewModel.exportVideo(
+                            context = context,
+                            segments = segments,
+                            resolution = resolution,
+                            onProgress = { progress ->
+                                exportProgress = progress
+                            },
+                            onComplete = { uri ->
+                                isExporting = false
+                                scope.launch {
+                                    if (uri != null) {
+                                        snackbarHostState.showSnackbar("Export successful! Video and subtitles saved to Downloads/SubAI.")
+                                    } else {
+                                        snackbarHostState.showSnackbar("Export failed.")
+                                    }
+                                }
                             }
-                            isExporting = false
-                            snackbarHostState.showSnackbar("Export successful! Video saved to Downloads.")
-                        }
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
